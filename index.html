@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#84c8eb" />
+    <meta name="description" content="Skyward Parkour – leo lên đỉnh, trượt thì rơi xuống và tiếp tục leo!" />
+    <title>Skyward Parkour · Map 001</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas" aria-label="Skyward Parkour 3D"></canvas>
+      <div class="hud">
+        <div class="brand"><span class="brand-icon">▲</span> SKYWARD <span class="brand-tag">MAP 001</span></div>
+        <div class="scores">
+          <div class="score-pill"><span class="score-label">ĐỘ CAO</span><strong id="height">0.0 <small>m</small></strong></div>
+          <div class="score-pill record"><span class="score-label">KỶ LỤC</span><strong id="record">0.0 <small>m</small></strong></div>
+        </div>
+        <div class="hud-bottom"><span id="status">Đang đứng vững</span><button id="menu-button" class="hud-button" aria-label="Tạm dừng">Ⅱ</button></div>
+      </div>
+      <div id="touch-ui" class="touch-ui" aria-label="Điều khiển cảm ứng">
+        <div id="joystick-zone" class="joystick-zone" aria-label="Joystick di chuyển"><div class="joystick-base"><div id="joystick-stick" class="joystick-stick"></div></div></div>
+        <div class="touch-hint">VUỐT PHÍA PHẢI ĐỂ XOAY CAMERA</div>
+        <button id="jump-button" class="jump-button" aria-label="Nhảy"><span>↑</span><small>NHẢY</small></button>
+      </div>
+      <div id="screen" class="screen visible">
+        <div class="screen-card">
+          <div class="overline">PARKOUR 3D · MAP 001</div>
+          <div class="card-icon">▲</div>
+          <h1 id="screen-title">SKYWARD<br/><span>PARKOUR</span></h1>
+          <p id="screen-text">Leo cao nhất có thể. Nếu trượt, bạn sẽ rơi xuống tầng thấp hơn và tiếp tục leo tại đó. Không hồi sinh, không dịch chuyển!</p>
+          <div class="instruction"><div><b>PC</b><span>WASD di chuyển · Space nhảy · Kéo chuột xoay camera</span></div><div><b>Mobile</b><span>Joystick trái · Chạm NHẢY · Vuốt bên phải để nhìn</span></div></div>
+          <div class="screen-actions"><button id="play-button" class="primary-button">BẮT ĐẦU LEO <span>↗</span></button><button id="reset-button" class="secondary-button" hidden>CHƠI LẠI TỪ ĐẦU</button></div>
+          <p class="small-note">Tính điểm bằng độ cao lớn nhất bạn từng đạt, kể cả sau khi rơi.</p>
+        </div>
+      </div>
+      <div id="loading" class="loading"><span class="loading-spinner"></span> ĐANG TẢI THẾ GIỚI 3D…</div>
+      <div id="toast" class="toast" aria-live="polite"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
