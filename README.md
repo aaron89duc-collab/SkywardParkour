@@ -29,22 +29,34 @@ Hoặc đẩy thư mục này lên GitHub rồi Import vào Vercel – không c�
 
 | PC | Điện thoại | Chức năng |
 |---|---|---|
-| W A S D / phím mũi tên | Cần điều khiển ảo (trái) | Di chuyển (Ctrl/Alt: đi bộ) |
-| Space (giữ lâu = nhảy cao) | NHẢY | Nhảy / leo lên khi đang bám |
-| E hoặc Shift | THẢ | Buông mép |
-| Chuột (nhấp vào màn hình để khoá chuột) | Vuốt nửa phải màn hình | Xoay camera |
+| W A S D / phím mũi tên | Cần điều khiển ảo (trái) | Di chuyển (Ctrl/Alt: đi bộ; đẩy cần nhẹ = đi chậm) |
+| Space (giữ lâu = nhảy cao) | NHẢY | Nhảy (cao ~2,55 m) |
+| Space khi đang treo | LEO | Leo lên mép |
+| A / D khi đang treo | Cần trái/phải khi treo | Di chuyển ngang dọc theo mép |
+| S + Space khi đang treo | Kéo lùi + NHẢY | Đạp tường bật ngược ra sau |
+| E hoặc Shift | THẢ | Đang treo: buông tay · Đứng sát mép: tụt xuống bám mép |
+| Chuột (nhấp để khoá chuột) | Vuốt nửa phải màn hình | Xoay camera |
 | Cuộn chuột | – | Zoom camera |
 | Esc / P | Nút II | Tạm dừng |
 
-## Cảm giác điều khiển (đã cài đặt)
+## Chuyển động nhân vật
 
-- Variable jump height, coyote time (0,12 s), jump buffer (0,14 s), air control có quán tính, trọng lực lên/xuống khác nhau.
-- Bám mép tự động khi nhảy vào gờ, treo người, leo lên (Space) hoặc buông (E/Shift, hoặc kéo cần ra xa tường).
-- **IK tay khi bám mép**: hai cổ tay được kéo đúng vào mép bệ (two-bone IK chạy runtime).
-- Rơi không chết, không checkpoint. Rơi từ cao (>9 m) có hoạt ảnh tiếp đất mạnh + rung camera.
-- Camera góc nhìn thứ ba, bám mượt, va chạm tường (sphere-cast), giữ nhân vật trong khung khi rơi nhanh.
+- **Bắt mép khi rơi**: rơi ngang qua mép bệ/đảo với tốc độ < 17 m/s (rơi khoảng dưới 3,5 m) thì tự bám, kể cả mép ở bên cạnh hay phía sau. Rơi nhanh hơn thì không bám được. Không bám khi đang đẩy cần ra xa tường hoặc đang bay khỏi tường đó.
+- **Nhảy hụt một chút → đu lên (mantle)**: chân thấp hơn mép 0,3–1,25 m khi lao vào tường thì tự kéo người lên.
+- **Treo**: đung đưa theo quán tính khi bắt mép lúc rơi, hai tay đặt đúng mép (IK). Leo lên 2 pha (kéo người → bước lên).
+- **Di chuyển ngang khi treo** (từng nhịp tay ~1 m, tự dừng khi mép hết).
+- **Tụt xuống bám mép**: bấm THẢ/E khi đứng gần mép, hoặc đi chậm ra khỏi mép → nhân vật quay lại và hạ người xuống treo.
+- **Đạp tường bật ra sau** khi đang treo.
+- **Lộn nhào khi tiếp đất**: rơi 3–24 m mà vẫn đang chạy và phía trước còn chỗ → lộn một vòng rồi chạy tiếp; tự phanh nếu sắp lăn ra khỏi mép.
+- **Vượt rào**: chạy nhanh vào chướng ngại cao 0,45–1,3 m và mỏng → vault qua; chướng ngại dày → đẩy vào một chút là đu lên.
+- Nghiêng người khi rẽ lúc chạy, tiếp đất "dính" khi không giữ cần (đỡ trượt khỏi bệ nhỏ), không còn giật trạng thái rơi trên bề mặt gồ ghề.
 
-Tất cả thông số nằm trong `src/config.ts`.
+## Điện thoại
+
+- Bấm **BẮT ĐẦU LEO** là vào toàn màn hình và khoá xoay ngang (Android/Chrome). Có nút toàn màn hình ở góc HUD và trong menu tạm dừng.
+- iPhone (Safari không hỗ trợ toàn màn hình cho web): **Chia sẻ → Thêm vào MH chính**, mở từ biểu tượng Skyward sẽ chạy toàn màn hình (có sẵn manifest + icon).
+- Cầm dọc sẽ hiện nhắc xoay ngang (có nút chơi dọc).
+- Độ phân giải tự giảm/tăng theo FPS để giữ ~30 FPS trên điện thoại; rung nhẹ khi bám mép/tiếp đất mạnh (Android).
 
 ## Map 001 – Starter Village (140 m, 5 khu)
 
@@ -67,6 +79,7 @@ Map được sinh từ `devtools/build-map001.mjs` (bố cục viết tay, các 
 
 1. **Validator** (`npm run map`): đồ thị nhảy theo đúng vật lý trong `config.ts` – xác nhận có đường từ spawn đến cổng ra, không có chỗ kẹt (soft-lock), không bệ nào thiếu khoảng trống trên đầu. Ảnh sơ đồ: `devtools/out/map001_plan.png`.
 2. **Bot vật lý** (`npm run test:bot`, cần `npm i -D playwright && npx playwright install chromium` và `npm run dev` đang chạy): bot chạy/nhảy từng đoạn bằng controller + collider thật. Kết quả hiện tại: đường chính 131/131, S1 14/14, S2 16/16, S3 14/14.
+3. **Test chuyển động** (`node devtools/moves.cjs`): bắt mép khi rơi, rơi nhanh không bám, di chuyển ngang, đạp tường, leo lên, tụt xuống bám mép (nút & đi chậm), lộn nhào, đu lên giữa không trung, vault, mantle.
 
 ## Cấu trúc
 

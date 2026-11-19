@@ -7,7 +7,7 @@ const deg = (d) => (d * Math.PI) / 180;
 export const r2 = (v) => Math.round(v * 100) / 100;
 
 // ---------------------------------------------------------------- physics model (mirrors src/config.ts)
-export const PHYS = { run: 7.0, gUp: 30, gDown: 42, v0: 11.2, capsuleR: 0.3, apex: (11.2 * 11.2) / (2 * 30), grabMax: 2.05, grabMin: 0.95, hand: 1.9 };
+export const PHYS = { run: 7.0, gUp: 30, gDown: 42, v0: 12.4, capsuleR: 0.3, apex: (12.4 * 12.4) / (2 * 30), grabMax: 2.05, grabMin: 0.95, hand: 1.9 };
 /** Max horizontal distance (centre to centre of the capsule) for a running jump that lands dh higher. */
 export function reach(dh) {
   if (dh > PHYS.apex - 0.05) return 0;

@@ -4,13 +4,14 @@ const fs = require('fs');
 (async () => {
   const routes = JSON.parse(fs.readFileSync(__dirname + '/out/routes.json', 'utf8'));
   const only = process.argv[2];
+  const onlyK = process.argv[3] ? parseInt(process.argv[3]) : -1;
   const browser = await chromium.launch({ args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
   const page = await browser.newPage({ viewport: { width: 320, height: 200 } });
   page.on('pageerror', e => console.log('pageerror', e.message));
   await page.goto('http://127.0.0.1:5173/');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 180000 });
   await page.evaluate(() => { const g = window.__game; g.renderer.setAnimationLoop(null); g.state = 'playing'; g.input.enabled = true; });
-  const res = await page.evaluate(({ routes, only }) => {
+  const res = await page.evaluate(({ routes, only, onlyK }) => {
     const g = window.__game, P = g.player, I = g.input, V = P.pos.constructor;
     const dt = 1 / 60;
     const step = (camYaw) => { I.update(); P.fixedUpdate(dt, I, camYaw); g.physics.step(); };
@@ -19,6 +20,8 @@ const fs = require('fs');
       if (only && name !== only) continue;
       const fails = [];
       for (let k = 0; k + 1 < pts.length; k++) {
+        if (onlyK >= 0 && k !== onlyK) continue;
+        const trace = [];
         const A = pts[k].p, B = pts[k + 1].p;
         let ok = false, why = '';
         for (let attempt = 0; attempt < 3 && !ok; attempt++) {
@@ -54,12 +57,13 @@ const fs = require('fs');
               const needUp = B[1] - feet.y > 0.42 && dist < 1.2;
               // skilled timing: take off when the full-jump flight distance matches the distance to the target
               const dh = B[1] - feet.y;
-              const flight = dh < 2.0 ? (11.2 / 30 + Math.sqrt(Math.max(0, 2 * (2.09 - dh) / 42))) * Math.max(P.speed, 3) : 0;
+              const flight = dh < 2.45 ? (12.4 / 30 + Math.sqrt(Math.max(0, 2 * (2.55 - dh) / 42))) * Math.max(P.speed, 3) : 0;
               const timed = dh > -6 && dist > 1.0 && flight > 0 && dist <= flight * 0.92 && dist >= flight * 0.6 && P.speed > 4.5;
               if ((!hit && dist > 0.6) || blocked || needUp || timed) { I.pressJump(); holdJump = dh < 0.5 && !blocked ? 0.16 : dh < 1.1 && !blocked ? 0.24 : 0.45; I.touchJumpHeld = true; lastJump = t; }
             }
             step(camYaw);
             t += dt;
+            if (onlyK >= 0) { const st = P.state + (P.moveKind ? ':' + P.moveKind : ''); if (!trace.length || trace[trace.length - 1].s !== st) trace.push({ s: st, t: +t.toFixed(2), p: [P.pos.x, P.pos.y - 0.8, P.pos.z].map(v => +v.toFixed(2)), mv: I.touchMoveY }); }
             const f2 = new V(P.pos.x, P.pos.y - 0.8, P.pos.z);
             const d2 = Math.hypot(B[0] - f2.x, B[2] - f2.z);
             if (P.state === 'ground' && d2 < 1.0 && f2.y > B[1] - 0.45 - (pts[k + 1].label === 'EXIT' ? 1 : 0) && f2.y < B[1] + 1.6) { ok = true; break; }
@@ -69,12 +73,12 @@ const fs = require('fs');
           }
           if (!ok && !why) why = 'timeout';
         }
-        if (!ok) fails.push({ k, from: A.map(v => +v.toFixed(1)), to: B.map(v => +v.toFixed(1)), label: pts[k + 1].label, why });
+        if (!ok) fails.push({ k, from: A.map(v => +v.toFixed(1)), to: B.map(v => +v.toFixed(1)), label: pts[k + 1].label, why, trace: onlyK >= 0 ? trace : undefined });
       }
       out[name] = { pairs: pts.length - 1, fails };
     }
     return out;
-  }, { routes, only });
+  }, { routes, only, onlyK });
   for (const [k, v] of Object.entries(res)) {
     console.log(`${k}: ${v.pairs - v.fails.length}/${v.pairs} ok`);
     for (const f of v.fails) console.log('   FAIL', JSON.stringify(f));

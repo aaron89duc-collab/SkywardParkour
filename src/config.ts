@@ -9,8 +9,8 @@ export const PHYS = {
   gravityDown: 42,
   terminalVelocity: 48,
 
-  // Jump: v = sqrt(2 * gUp * apex) -> apex ~2.1 m
-  jumpVelocity: 11.2,
+  // Jump: v = sqrt(2 * gUp * apex) -> apex ~2.55 m (tap = lower hop, hold = full height)
+  jumpVelocity: 12.4,
   jumpCutMultiplier: 0.45, // variable jump height: releasing early cuts upward speed
   coyoteTime: 0.12,
   jumpBuffer: 0.14,
@@ -19,8 +19,8 @@ export const PHYS = {
   walkSpeed: 3.0,
   groundAccel: 55,
   groundDecel: 65,
-  airAccel: 17, // air control: can steer, but not snap direction
-  airDecel: 3,
+  airAccel: 22, // air control: can steer, but not snap direction
+  airDecel: 7, // releasing the stick in the air bleeds drift (helps landing on small platforms)
   turnSpeedGround: 14,
   turnSpeedAir: 5,
 
@@ -35,13 +35,22 @@ export const PHYS = {
   minSlideDeg: 58,
 
   ledge: {
-    minRel: 0.95, // ledge height above feet that triggers a grab
+    minRel: 0.95, // ledge height above feet that triggers a hang
     maxRel: 2.05,
-    reach: 0.7, // forward probe length beyond capsule radius
+    reach: 0.75, // probe length beyond the capsule radius
     regrabCooldown: 0.45,
-    climbTime: 1.0,
+    climbTime: 0.95,
+    lowerTime: 0.75, // climbing down from a top into a hang
     maxUpVelocity: 7.0,
+    catchMaxFallSpeed: 17, // falling slower than this past an edge -> auto catch
+    mantleMinRel: 0.3, // ledge just above the feet while airborne -> pull up instead of falling
+    mantleMaxRel: 1.25,
+    shimmyCycle: 1.25, // seconds per hand-over-hand step
+    shimmyStep: 0.95, // metres per step
+    pushOff: { out: 6.2, up: 9.0, prep: 0.2 },
   },
+  vault: { minSpeed: 3.6, minRel: 0.45, maxRel: 1.3, maxDepth: 1.15 },
+  roll: { minDrop: 3.0, maxDrop: 24, minSpeed: 3.4, time: 0.62 },
 
   hardLandingDrop: 9, // metres fallen before a heavy landing animation
   safetyFloorY: -60, // anti soft-lock only (not a checkpoint)

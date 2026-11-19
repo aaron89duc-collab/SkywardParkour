@@ -25,7 +25,7 @@ const fs = require('fs');
   } else if (mode === 'anim') {
     const [, , , file, clip, n, az] = process.argv;
     const dur = await page.evaluate(async ([u, c]) => { const g = await loadGLB(u); return g.animations.find(a => a.name === c).duration; }, [file, clip]);
-    const N = parseInt(n || '8'); const times = [...Array(N)].map((_, i) => dur * i / (N - 1));
+    const N = parseInt(n || '8'); const T0 = parseFloat(process.env.T0 || '0'), T1 = parseFloat(process.env.T1 || String(dur)); const times = [...Array(N)].map((_, i) => T0 + (T1 - T0) * i / (N - 1));
     const r = await page.evaluate(([u, c, t, a]) => renderAnim(u, c, t, a), [file, clip, times, parseFloat(az || '30')]);
     console.log(clip, 'dur', r.dur.toFixed(2), 'hips', JSON.stringify(r.hips));
     if (process.argv[9] === 'bones') console.log(r.bones.join(','));

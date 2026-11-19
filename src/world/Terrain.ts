@@ -79,7 +79,8 @@ export function buildTerrain(data: MapData['terrain'], physics: Physics): THREE.
   group.add(lip);
 
   // colliders: solid ground disc + invisible boundary so the player can never fall into the void
-  physics.addCylinder(new THREE.Vector3(0, -2, 0), 2, R);
+  // flat box (exact top plane) – the invisible ring wall keeps players inside the round plateau
+  physics.addBox(new THREE.Vector3(0, -2, 0), new THREE.Vector3(R, 2, R));
   const segs = 64, wallR = R - 1.2;
   for (let i = 0; i < segs; i++) {
     const a = (i / segs) * Math.PI * 2;

@@ -50,6 +50,7 @@ window.renderAnim = async (url, clipName, times, az=30) => {
   let hipBone; obj.traverse(o=>{ if(o.isBone && /hip/i.test(o.name) && !hipBone) hipBone=o; });
   for (const t of times) { mixer.setTime(t); obj.updateMatrixWorld(true);
     const hp = new THREE.Vector3(); hipBone.getWorldPosition(hp); hips.push(hp.toArray().map(v=>+v.toFixed(2)));
+    cam.position.set(hp.x + Math.sin(a)*4.5, 1.6, hp.z + Math.cos(a)*4.5); cam.lookAt(hp.x, 0.9, hp.z); grid.position.set(Math.round(hp.x), 0, Math.round(hp.z));
     renderer.render(scene,cam); out.push(renderer.domElement.toDataURL('image/png')); }
   const bones=[]; obj.traverse(o=>{if(o.isBone) bones.push(o.name)});
   return {imgs:out, hips, bones, dur:clip.duration};

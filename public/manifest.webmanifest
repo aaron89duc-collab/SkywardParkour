@@ -1,0 +1,16 @@
+{
+  "name": "Skyward Parkour",
+  "short_name": "Skyward",
+  "description": "Game leo trèo 3D – chinh phục độ cao từ Starter Village.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#3c84d6",
+  "theme_color": "#2f7fe0",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

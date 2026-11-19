@@ -19,6 +19,7 @@ import { Effects } from '../fx/Effects';
 import { UI } from '../ui/UI';
 import { AudioEngine } from '../systems/Audio';
 import { Score, loadSave, writeSave, type SaveData } from '../systems/Score';
+import { enterFullscreen, fullscreenSupported, isFullscreen, toggleFullscreen } from '../ui/Fullscreen';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'finished';
 type CharId = 'male' | 'female';
@@ -81,6 +82,7 @@ export class Game {
       onShowFps: (v) => { this.save.settings.showFps = v; writeSave(this.save); },
       onPause: () => this.pause(),
       onClick: () => { this.audio.init(); this.audio.click(); },
+      onFullscreen: () => toggleFullscreen(),
     }, this.isTouch);
     this.ui.bindSave(this.save, this.quality);
     this.assets.onProgress = (d, t) => this.ui.setLoading(t ? d / t : 0);
@@ -132,6 +134,8 @@ export class Game {
     this.setupComposer(preset.bloom);
     this.ui.setupHUD(this.map.zones, this.map.height, this.save.personalBest);
     window.addEventListener('resize', () => this.onResize());
+    window.visualViewport?.addEventListener('resize', () => this.onResize());
+    document.addEventListener('fullscreenchange', () => setTimeout(() => this.onResize(), 50));
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); this.score.flush(); });
     window.addEventListener('beforeunload', () => this.score.flush());
 
@@ -234,6 +238,7 @@ export class Game {
 
   applyQuality(q: Quality) {
     this.quality = q;
+    this.dynScale = 1;
     const p = QUALITY_PRESETS[q];
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, p.pixelRatio));
     this.env.setShadows(p.shadows, p.shadowMap);
@@ -244,19 +249,45 @@ export class Game {
     this.onResize();
   }
 
+  // ---- adaptive resolution: keep the frame rate up on phones by lowering render resolution
+  private dynScale = 1;
+  private dynTimer = 0;
+  private fpsWindow: number[] = [];
+  private adaptResolution(dt: number) {
+    if (this.state !== 'playing') return;
+    this.fpsWindow.push(dt);
+    this.dynTimer += dt;
+    if (this.dynTimer < 2) return;
+    const avg = this.fpsWindow.length / this.fpsWindow.reduce((a, b) => a + b, 0);
+    this.fpsWindow = [];
+    this.dynTimer = 0;
+    const target = this.isTouch ? 30 : 50;
+    let next = this.dynScale;
+    if (avg < target * 0.85) next = Math.max(0.65, this.dynScale - 0.1);
+    else if (avg > target * 1.45) next = Math.min(1, this.dynScale + 0.08);
+    if (Math.abs(next - this.dynScale) > 0.01) {
+      this.dynScale = next;
+      this.onResize();
+    }
+  }
+
   private onResize() {
     const w = window.innerWidth, h = window.innerHeight;
+    const p = QUALITY_PRESETS[this.quality];
+    this.renderer.setPixelRatio(Math.max(0.5, Math.min(window.devicePixelRatio, p.pixelRatio) * this.dynScale));
     this.renderer.setSize(w, h);
     this.cam.camera.aspect = w / h;
     this.cam.camera.fov = w < h ? 72 : 60;
     this.cam.camera.updateProjectionMatrix();
-    this.composer?.setSize(w, h);
+    if (this.composer) { this.composer.setPixelRatio(this.renderer.getPixelRatio()); this.composer.setSize(w, h); }
     this.fx.dust.setViewport(h);
     this.fx.sparkles.setViewport(h);
   }
 
   // ------------------------------------------------------------------ flow
   start() {
+    // phones: go fullscreen + landscape straight from the START tap (needs the user gesture)
+    if (this.isTouch && fullscreenSupported() && !isFullscreen()) enterFullscreen();
     this.audio.init();
     this.audio.setVolume(this.save.settings.volume);
     this.ui.hideMenu();
@@ -281,6 +312,7 @@ export class Game {
     this.lastZone = null;
     this.acc = 0;
     if (this.state === 'paused') { this.state = 'playing'; this.input.enabled = true; }
+    this.hangTipShown = false;
     this.input.clearEdges();
   }
 
@@ -334,8 +366,10 @@ export class Game {
 
   // ------------------------------------------------------------------ loop
   private frame() {
-    const dt = Math.min(this.clock.getDelta(), 0.1);
+    const rawDt = this.clock.getDelta();
+    const dt = Math.min(rawDt, 0.1);
     this.time += dt;
+    this.adaptResolution(Math.min(rawDt, 0.5));
     this.fpsAvg = this.fpsAvg * 0.95 + (dt > 0 ? 1 / dt : 60) * 0.05;
     this.input.update();
     const pausePressed = this.input.consumePause();
@@ -425,6 +459,12 @@ export class Game {
     }
   }
 
+  private haptic(ms: number) {
+    if (this.isTouch && navigator.vibrate) { try { navigator.vibrate(ms); } catch { /* unsupported */ } }
+  }
+
+  private hangTipShown = false;
+
   private onPlayerEvent(e: ReturnType<Player['drainEvents']>[number]) {
     const feet = this.player.renderPos.clone();
     switch (e.type) {
@@ -436,11 +476,27 @@ export class Game {
         const k = THREE.MathUtils.clamp(e.drop / 14, 0, 1);
         this.audio.land(0.2 + k);
         this.fx.dust.emit(feet, 4 + Math.round(k * 16), { speed: 2 + k * 4, up: 0.4, life: 0.6 + k * 0.5, size: 0.5 + k * 0.6 });
-        if (e.drop > 6) this.cam.addShake(Math.min(0.9, e.drop / 25));
+        if (e.drop > 6 && this.player.state !== 'roll') { this.cam.addShake(Math.min(0.9, e.drop / 25)); this.haptic(Math.min(60, 10 + e.drop * 3)); }
         break;
       }
-      case 'grab': this.audio.grab(); break;
+      case 'catch':
+        this.audio.grab();
+        this.cam.addShake(Math.min(0.35, e.speed / 40));
+        this.haptic(25);
+        this.showHangTip();
+        break;
+      case 'grab': this.audio.grab(); this.haptic(12); this.showHangTip(); break;
       case 'climb': this.audio.climb(); break;
+      case 'mantle': this.audio.climb(); this.haptic(10); break;
+      case 'vault': this.audio.jump(); this.fx.dust.emit(feet, 4, { speed: 1.2, up: 0.3, life: 0.4, size: 0.35 }); break;
+      case 'roll':
+        this.audio.land(0.35);
+        this.fx.dust.emit(feet, 10, { speed: 3, up: 0.3, life: 0.7, size: 0.6 });
+        this.haptic(18);
+        break;
+      case 'shimmy': this.audio.step(false); break;
+      case 'push': this.audio.jump(); this.haptic(15); break;
+      case 'lower': this.audio.climb(); this.showHangTip(); break;
       case 'drop': break;
       case 'step':
         this.audio.step(e.run);
@@ -450,5 +506,19 @@ export class Game {
         this.ui.toast('Đã đưa về làng', 'Bạn rơi ra ngoài thế giới');
         break;
     }
+  }
+
+  /** One-time tutorial the first few times the player hangs on a ledge. */
+  private showHangTip() {
+    if (this.hangTipShown) return;
+    this.hangTipShown = true;
+    const n = (this.save.tips ?? 0);
+    if (n >= 3) return;
+    this.save.tips = n + 1;
+    writeSave(this.save);
+    const msg = this.isTouch
+      ? 'NHẢY: leo lên · Cần trái/phải: đi dọc mép · Kéo lùi + NHẢY: bật tường · THẢ: buông'
+      : 'Space: leo lên · A/D: đi dọc mép · S + Space: bật tường · E: buông';
+    this.ui.toast('Đang bám mép', msg, false, 4200);
   }
 }

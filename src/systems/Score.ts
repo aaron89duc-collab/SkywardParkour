@@ -7,6 +7,7 @@ export type SaveData = {
   totalPlayTime: number;
   completions: number;
   bestTime: number | null; // seconds to reach the Map 001 exit
+  tips?: number; // how many times the hang tutorial was shown
   settings: { volume: number; quality: Quality | null; sensitivity: number; showFps: boolean };
 };
 

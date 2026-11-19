@@ -1,6 +1,7 @@
 import type { ZoneData } from '../world/MapTypes';
 import type { SaveData } from '../systems/Score';
 import type { Quality } from '../config';
+import { fullscreenSupported, isFullscreen, isIOS, isStandalone } from './Fullscreen';
 
 export type UIHandlers = {
   onStart: () => void;
@@ -14,6 +15,7 @@ export type UIHandlers = {
   onShowFps: (v: boolean) => void;
   onPause: () => void;
   onClick: () => void;
+  onFullscreen: () => void;
 };
 
 const fmtTime = (s: number) => {
@@ -52,6 +54,8 @@ export class UI {
   private altPb!: HTMLElement;
   private mapHeight = 140;
   private settingsReturn: 'menu' | 'pause' = 'menu';
+  private rotate!: HTMLDivElement;
+  private rotateDismissed = false;
   private character: 'male' | 'female' = 'male';
   private quality: Quality = 'high';
   private save: SaveData | null = null;
@@ -75,6 +79,7 @@ export class UI {
       <div class="height"><div class="cur">0<small>m</small></div><div class="lines"></div></div>
       <div class="zone"></div>
       <button class="pause-btn" aria-label="Tạm dừng">II</button>
+      <button class="fs-btn" aria-label="Toàn màn hình"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
       <div class="altbar"></div>
       <div class="hint hidden"></div>
       <div class="fps hidden"></div>`);
@@ -85,6 +90,18 @@ export class UI {
     this.hint = this.hud.querySelector('.hint')!;
     this.fps = this.hud.querySelector('.fps')!;
     (this.hud.querySelector('.pause-btn') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.h.onPause(); });
+    const fsBtn = this.hud.querySelector('.fs-btn') as HTMLButtonElement;
+    if (!fullscreenSupported() || isStandalone()) fsBtn.classList.add('hidden');
+    fsBtn.addEventListener('click', () => { this.h.onClick(); this.h.onFullscreen(); });
+
+    // portrait warning on phones
+    this.rotate = el('div', 'rotate-overlay hidden', `<div class="phone"></div><div class="rt1">Xoay ngang điện thoại</div><div class="rt2">Skyward Parkour chơi tốt nhất ở màn hình ngang</div><button class="btn secondary">Vẫn chơi màn hình dọc</button>`);
+    (this.rotate.querySelector('button') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.rotateDismissed = true; this.updateOrientation(); });
+    parent.appendChild(this.rotate);
+    const upd = () => this.updateOrientation();
+    window.addEventListener('resize', upd);
+    window.addEventListener('orientationchange', upd);
+    this.updateOrientation();
 
     this.speed = el('div', 'speedlines');
     parent.appendChild(this.speed);
@@ -97,6 +114,11 @@ export class UI {
     parent.appendChild(this.settings);
     this.finish = el('div', 'overlay hidden');
     parent.appendChild(this.finish);
+  }
+
+  updateOrientation() {
+    const portrait = window.innerHeight > window.innerWidth * 1.05;
+    this.rotate.classList.toggle('hidden', !(this.touch && portrait && !this.rotateDismissed));
   }
 
   // ---------------- loading
@@ -133,6 +155,7 @@ export class UI {
           <button class="char ${this.character === 'female' ? 'sel' : ''}" data-c="female">${img('female')}<div class="nm">Nhân vật nữ</div><div class="ds">Mia</div></button>
         </div>
         <button class="btn" data-a="start">BẮT ĐẦU LEO</button>
+        ${this.touch && isIOS() && !isStandalone() ? '<div class="ios-tip">iPhone: bấm <b>Chia sẻ</b> → <b>Thêm vào MH chính</b> để chơi toàn màn hình</div>' : ''}
         <div class="row"><button class="btn secondary" data-a="settings">Cài đặt</button></div>
         <div class="stats">
           <div class="stat"><b>${best.toFixed(0)} m</b><span>Kỷ lục cá nhân</span></div>
@@ -217,6 +240,7 @@ export class UI {
       <button class="btn" data-a="resume">Tiếp tục</button>
       <button class="btn secondary" data-a="char">Đổi nhân vật: ${character === 'male' ? 'Nam → Nữ' : 'Nữ → Nam'}</button>
       <button class="btn secondary" data-a="settings">Cài đặt</button>
+      ${fullscreenSupported() && !isStandalone() ? `<button class="btn secondary" data-a="fs">${isFullscreen() ? 'Thoát toàn màn hình' : 'Toàn màn hình'}</button>` : ''}
       <button class="btn secondary" data-a="restart">Chơi lại từ đầu</button>
       <button class="btn secondary" data-a="menu">Về menu chính</button>
     </div><div class="note">Đổi nhân vật giữ nguyên vị trí và điểm hiện tại.</div></div>`;
@@ -228,6 +252,7 @@ export class UI {
       this.showPause(next);
     });
     on('settings', () => { this.pause.classList.add('hidden'); this.openSettings('pause'); });
+    if (this.pause.querySelector('[data-a=fs]')) on('fs', () => { this.h.onFullscreen(); setTimeout(() => this.showPause(this.character), 300); });
     on('restart', () => {
       const b = this.pause.querySelector('[data-a=restart]') as HTMLButtonElement;
       if (b.dataset.confirm) this.h.onRestart();
