@@ -302,7 +302,8 @@ const stH = PODIUM_TOP - (podBase[1] - 0.05);
 B.kitPiece('stairs', [podC[0] + 3.2 + 0.2, PODIUM_TOP, podC[1] + 0.6], [2.8, stH, stH * 1.05, Math.ceil(stH / 0.4)], -90);
 B.mark('main', [podC[0] + 3.4 + stH * 0.95, podBase[1] + 0.4, podC[1] + 0.6], 'podium stairs');
 B.mark('main', [podC[0] + 3.4, PODIUM_TOP, podC[1] + 0.6], 'podium');
-B.prefab('wooden_village_gate', podC[0], PODIUM_TOP - 0.05, podC[1], 90, 6.4, { name: 'Gate to Map 002', tag: 'exit-gate' });
+// the gate stands on the podium's north edge: walk through it onto the sky bridge to Rooftop City
+B.prefab('wooden_village_gate', podC[0], PODIUM_TOP - 0.05, podC[1] - 2.4, 0, 6.4, { name: 'Gate to Map 002', tag: 'exit-gate' });
 B.prefab('crystal_blue_shrine', -4.0, T(I8, -4.0, -40.2)[1] - 0.1, -40.2, 0, 4.2, { name: 'Exit Shrine', tag: 'exit' });
 B.banner(podC[0] + 2.2, PODIUM_TOP, podC[1] - 2.6); B.banner(podC[0] + 2.2, PODIUM_TOP, podC[1] + 2.6);
 B.sprite('direction_sign', podC[0] + 3.9, podBase[1], podC[1] - 1.8, 2.2);
@@ -397,8 +398,11 @@ const data = B.toJSON({
   spawn: { p: SPAWN, yaw: Math.PI },
   exit: { p: EXIT.map(r2), r: 2.6, next: 'map002', label: 'Map 002 – Rooftop City' },
   zones, milestones: MILESTONES,
+  region: { c: [0, 0], r: 85 },
   terrain: {
     radius: 85,
+    // Rooftop City floats above the village: the invisible ring wall goes all the way up past its top
+    wallTop: 340,
     plazas: [{ p: [0, 37], r: 9 }, { p: [0, 7], r: 12 }, { p: [33, -4], r: 6 }],
     paths: [
       { a: [0, 53], b: [0, 37], w: 3.6 }, { a: [0, 37], b: [0, 7], w: 3.6 }, { a: [0, 7], b: [0, -14], w: 3.6 }, { a: [0, -14], b: [0, -42], w: 3 },

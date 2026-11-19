@@ -10,11 +10,13 @@ const fs = require('fs');
   page.on('pageerror', e => console.log('pageerror', e.message));
   await page.goto('http://127.0.0.1:5173/');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 180000 });
+  await page.evaluate(() => window.__game.loadOtherMaps());
   await page.evaluate(() => { const g = window.__game; g.renderer.setAnimationLoop(null); g.state = 'playing'; g.input.enabled = true; });
   const res = await page.evaluate(({ routes, only, onlyK }) => {
     const g = window.__game, P = g.player, I = g.input, V = P.pos.constructor;
     const dt = 1 / 60;
-    const step = (camYaw) => { I.update(); P.fixedUpdate(dt, I, camYaw); g.physics.step(); };
+    let unstuck = 0;
+    const step = (camYaw) => { I.update(); P.fixedUpdate(dt, I, camYaw); g.physics.step(); for (const e of P.drainEvents()) if (e.type === 'unstuck') unstuck++; };
     const out = {};
     for (const [name, pts] of Object.entries(routes)) {
       if (only && name !== only) continue;
@@ -30,7 +32,7 @@ const fs = require('fs');
           for (let i = 0; i < 40; i++) step(0);
           const startFeet = P.renderPos.clone(); startFeet.copy(P.pos); startFeet.y -= 0.8;
           if (Math.abs(startFeet.y - A[1]) > 0.6) { why = `start not standable (y ${startFeet.y.toFixed(2)} vs ${A[1]})`; continue; }
-          let t = 0, holdJump = 0, lastJump = -1, stuckT = 0;
+          let t = 0, holdJump = 0, lastJump = -1, stuckT = 0, hangDropped = false, prevVy = 0; // caught a ledge far above the target: let go once, like a player would
           // attempt variants: different jump trigger distance
           const edgeProbe = [0.45, 0.25, 0.65][attempt];
           while (t < 6) {
@@ -43,17 +45,17 @@ const fs = require('fs');
               const disc = vy * vy + 2 * 42 * Math.max(-1, h + vy * vy / (2 * 30) * (vy > 0 ? 1 : 0));
               const tl = vy > 0 ? vy / 30 + Math.sqrt(Math.max(0, 2 * (h + vy * vy / 60) / 42)) : (vy + Math.sqrt(Math.max(0, disc))) / 42;
               const land = P.speed * tl;
-              I.touchMoveY = dist > land + 0.2 ? 1 : dist < land - 0.4 ? -1 : 0;
+              I.touchMoveY = dist > land + 0.2 ? 1 : dist < land - 0.12 ? -1 : 0; // momentum is kept in the air: pull back to stop
               void g;
             } else I.touchMoveY = dist > 0.35 ? (dist < 0.9 && B[1] - feet.y < 0.4 ? 0.45 : 1) : 0;
             I.touchJumpHeld = holdJump > 0;
             holdJump -= dt;
-            if (P.state === 'hang') { I.pressJump(); }
+            if (P.state === 'hang') { if (P.ledge && P.ledge.y - B[1] > 1.2 && !hangDropped && prevVy < -1) { I.pressDrop(); hangDropped = true; } else I.pressJump(); }
             else if (P.state === 'ground' && t - lastJump > 0.35) {
               const nx = dx / (dist || 1), nz = dz / (dist || 1);
               const ahead = new V(feet.x + nx * edgeProbe, feet.y + 0.3, feet.z + nz * edgeProbe);
               const hit = g.physics.raycast(ahead, new V(0, -1, 0), 1.1);
-              const blocked = P.speed < 1.2 && t > 0.35 && dist > 0.7;
+              const blocked = Math.min(P.speed, P.actualSpeed) < 1.2 && t > 0.35 && dist > 0.7;
               const needUp = B[1] - feet.y > 0.42 && dist < 1.2;
               // skilled timing: take off when the full-jump flight distance matches the distance to the target
               const dh = B[1] - feet.y;
@@ -61,6 +63,7 @@ const fs = require('fs');
               const timed = dh > -6 && dist > 1.0 && flight > 0 && dist <= flight * 0.92 && dist >= flight * 0.6 && P.speed > 4.5;
               if ((!hit && dist > 0.6) || blocked || needUp || timed) { I.pressJump(); holdJump = dh < 0.5 && !blocked ? 0.16 : dh < 1.1 && !blocked ? 0.24 : 0.45; I.touchJumpHeld = true; lastJump = t; }
             }
+            if (P.state !== 'hang') prevVy = P.vel.y;
             step(camYaw);
             t += dt;
             if (onlyK >= 0) { const st = P.state + (P.moveKind ? ':' + P.moveKind : ''); if (!trace.length || trace[trace.length - 1].s !== st) trace.push({ s: st, t: +t.toFixed(2), p: [P.pos.x, P.pos.y - 0.8, P.pos.z].map(v => +v.toFixed(2)), mv: I.touchMoveY }); }
@@ -77,8 +80,9 @@ const fs = require('fs');
       }
       out[name] = { pairs: pts.length - 1, fails };
     }
-    return out;
+    out.unstuckEvents = unstuck; return out;
   }, { routes, only, onlyK });
+  console.log('unstuck events:', res.unstuckEvents); delete res.unstuckEvents;
   for (const [k, v] of Object.entries(res)) {
     console.log(`${k}: ${v.pairs - v.fails.length}/${v.pairs} ok`);
     for (const f of v.fails) console.log('   FAIL', JSON.stringify(f));

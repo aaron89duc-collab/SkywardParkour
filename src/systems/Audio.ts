@@ -46,7 +46,7 @@ export class AudioEngine {
   update(dt: number, height: number, fallSpeed: number, time: number) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    const h = Math.min(1, height / 140);
+    const h = Math.min(1, height / 200);
     const gust = 0.5 + 0.5 * Math.sin(time * 0.37) * Math.sin(time * 0.13 + 1);
     const g = 0.025 + h * 0.07 + gust * 0.02 * (0.3 + h) + Math.min(0.25, Math.max(0, fallSpeed - 8) * 0.012);
     this.windGain.gain.setTargetAtTime(g, t, 0.25);
@@ -104,6 +104,9 @@ export class AudioEngine {
   grab() { this.tone('triangle', 260, 180, 0.08, 0.12); this.burst(1800, 2, 0.05, 0.06); }
   climb() { this.burst(500, 1, 0.12, 0.08); this.burst(450, 1, 0.12, 0.07, 'bandpass', 0.35); }
   click() { this.tone('sine', 880, 660, 0.06, 0.05); }
+  boing() { this.tone('sine', 180, 720, 0.32, 0.14); this.tone('triangle', 360, 1200, 0.22, 0.05, 0.03); this.burst(900, 1.5, 0.1, 0.05); }
+  whoosh() { this.burst(1600, 0.7, 0.45, 0.14, 'bandpass', 0.05); this.tone('sine', 420, 880, 0.3, 0.05); }
+  clank() { this.tone('square', 140, 120, 0.06, 0.03); this.burst(2600, 3, 0.05, 0.05); }
   chime() { [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this.tone('sine', f, f, 0.5, 0.09, i * 0.09)); }
   fanfare() { [392, 523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => { this.tone('triangle', f, f, 0.6, 0.08, i * 0.12); this.tone('sine', f * 2, f * 2, 0.4, 0.03, i * 0.12); }); }
   private chirp() {

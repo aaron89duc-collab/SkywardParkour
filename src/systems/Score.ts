@@ -7,8 +7,9 @@ export type SaveData = {
   totalPlayTime: number;
   completions: number;
   bestTime: number | null; // seconds to reach the Map 001 exit
+  bestTimes?: Record<string, number>; // per map: seconds from the run start to that map's exit
   tips?: number; // how many times the hang tutorial was shown
-  settings: { volume: number; quality: Quality | null; sensitivity: number; showFps: boolean };
+  settings: { volume: number; quality: Quality | null; sensitivity: number; showFps: boolean; autoCam: boolean | null };
 };
 
 const KEY = 'skyward-parkour.save.v1';
@@ -20,7 +21,7 @@ const DEFAULTS: SaveData = {
   totalPlayTime: 0,
   completions: 0,
   bestTime: null,
-  settings: { volume: 0.7, quality: null, sensitivity: 1, showFps: false },
+  settings: { volume: 0.7, quality: null, sensitivity: 1, showFps: false, autoCam: null },
 };
 
 export function loadSave(): SaveData {

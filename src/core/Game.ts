@@ -3,19 +3,20 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { PHYS, QUALITY_PRESETS, detectDefaultQuality, type Quality } from '../config';
+import { PHYS, QUALITY_PRESETS, detectDefaultQuality, lowerQuality, minQuality, type Quality } from '../config';
 import { Physics } from './Physics';
 import { Assets } from './Assets';
 import { Input } from '../input/Input';
 import { TouchControls, isTouchDevice } from '../input/TouchControls';
 import { Player } from '../player/Player';
 import { CharacterModel } from '../player/CharacterModel';
-import { ThirdPersonCamera } from '../camera/ThirdPersonCamera';
+import { ThirdPersonCamera, type CamMode } from '../camera/ThirdPersonCamera';
 import { Environment } from '../world/Environment';
 import { Clouds } from '../world/Clouds';
 import { MapManager } from '../world/MapManager';
 import type { MapData, ZoneData } from '../world/MapTypes';
 import { Effects } from '../fx/Effects';
+import { installHeightFog } from '../world/HeightFog';
 import { UI } from '../ui/UI';
 import { AudioEngine } from '../systems/Audio';
 import { Score, loadSave, writeSave, type SaveData } from '../systems/Score';
@@ -55,15 +56,20 @@ export class Game {
   private fpsAvg = 60;
   private reachedMilestones = new Set<number>();
   private reachedZones = new Set<string>();
-  private finishedThisRun = false;
+  private finishedMaps = new Set<string>();
+  private simTime = 0;
+  private hudMap: MapData | null = null;
+  private dropShadow!: THREE.Mesh;
+  private startMap = 'map001';
   private isTouch = isTouchDevice();
   private sensitivity = 1;
   private lastZone: ZoneData | null = null;
 
   constructor(private container: HTMLElement) {
+    installHeightFog();
     this.save = loadSave();
     this.score = new Score(this.save);
-    this.quality = this.save.settings.quality ?? detectDefaultQuality();
+    this.quality = this.save.settings.quality ?? this.autoQualityStart();
     this.sensitivity = this.save.settings.sensitivity;
     this.charId = this.save.character;
   }
@@ -71,7 +77,7 @@ export class Game {
   async init() {
     const preset = QUALITY_PRESETS[this.quality];
     this.ui = new UI(this.container, {
-      onStart: () => this.start(),
+      onStart: (id) => void this.start(id ?? 'map001'),
       onResume: () => this.resume(),
       onRestart: () => this.restart(),
       onMainMenu: () => this.toMenu(),
@@ -80,6 +86,7 @@ export class Game {
       onQuality: (q) => { this.applyQuality(q); this.save.settings.quality = q; writeSave(this.save); },
       onSensitivity: (v) => { this.sensitivity = v; this.save.settings.sensitivity = v; writeSave(this.save); },
       onShowFps: (v) => { this.save.settings.showFps = v; writeSave(this.save); },
+      onAutoCam: (v) => { this.save.settings.autoCam = v; this.cam.autoFollow = v; writeSave(this.save); },
       onPause: () => this.pause(),
       onClick: () => { this.audio.init(); this.audio.click(); },
       onFullscreen: () => toggleFullscreen(),
@@ -89,7 +96,7 @@ export class Game {
 
     // renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: preset.antialias, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, preset.pixelRatio));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, preset.pixelRatio, Math.sqrt(preset.maxPixels / Math.max(1, window.innerWidth * window.innerHeight))));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
@@ -103,7 +110,7 @@ export class Game {
     await Physics.init();
     this.physics = new Physics();
     this.cam = new ThirdPersonCamera(this.physics, window.innerWidth / window.innerHeight);
-    this.cam.autoFollow = this.isTouch;
+    this.cam.autoFollow = this.save.settings.autoCam ?? this.isTouch;
     this.input = new Input(this.renderer.domElement);
     this.input.onPointerLockLost = () => { if (this.state === 'playing') this.pause(); };
     if (this.isTouch) this.touch = new TouchControls(this.input, this.container);
@@ -118,11 +125,12 @@ export class Game {
     this.maps = new MapManager(this.assets, this.physics, this.scene, this.fx);
     this.ui.setLoading(0.05, 'Đang dựng Starter Village…');
     await this.maps.loadRegistry();
-    await this.maps.ensureAround(0, 200);
+    await this.maps.load(this.maps.entry('map001')!);
     this.map = this.maps.primary!;
     this.maps.setLodDistance(preset.lodDistance);
 
     this.player = new Player(this.physics, this.scene);
+    this.player.hooks = this.maps;
     this.player.spawnPoint.set(...this.map.spawn.p);
     this.player.spawnYaw = this.map.spawn.yaw;
     this.ui.setLoading(0.9, 'Đang gọi nhân vật…');
@@ -132,7 +140,8 @@ export class Game {
     this.physics.step();
 
     this.setupComposer(preset.bloom);
-    this.ui.setupHUD(this.map.zones, this.map.height, this.save.personalBest);
+    this.setHudMap(this.map);
+    this.dropShadow = this.makeDropShadow();
     window.addEventListener('resize', () => this.onResize());
     window.visualViewport?.addEventListener('resize', () => this.onResize());
     document.addEventListener('fullscreenchange', () => setTimeout(() => this.onResize(), 50));
@@ -150,6 +159,66 @@ export class Game {
     this.clock.start();
     this.renderer.setAnimationLoop(() => this.frame());
     (window as unknown as { __game: Game }).__game = this;
+    // the city above the clouds streams in behind the menu (seamless world: it is visible from the village)
+    void this.loadOtherMaps();
+  }
+
+  private otherMaps: Promise<void> | null = null;
+  loadOtherMaps() {
+    if (!this.otherMaps) {
+      this.otherMaps = (async () => {
+        for (const e of this.maps.registry) {
+          if (this.maps.map(e.id)) continue;
+          try { await this.maps.load(e); } catch (err) { console.warn('map load failed', e.id, err); }
+        }
+        this.maps.setLodDistance(QUALITY_PRESETS[this.quality].lodDistance);
+        this.renderer.compile(this.scene, this.cam.camera);
+      })();
+    }
+    return this.otherMaps;
+  }
+
+  /** Blob shadow projected straight down while airborne: shows where you will land, and how far below that is. */
+  private makeDropShadow() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d')!;
+    const grd = g.createRadialGradient(64, 64, 6, 64, 64, 62);
+    grd.addColorStop(0, 'rgba(10,20,40,0.85)');
+    grd.addColorStop(0.55, 'rgba(10,20,40,0.45)');
+    grd.addColorStop(1, 'rgba(10,20,40,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, fog: true }));
+    m.renderOrder = 5;
+    m.visible = false;
+    this.scene.add(m);
+    return m;
+  }
+
+  private updateDropShadow() {
+    const P = this.player;
+    const air = P.state === 'air' || P.state === 'hang' || P.state === 'ladder' || (P.state === 'move' && P.moveKind !== 'climb');
+    const ds = this.dropShadow;
+    const mat = ds.material as THREE.MeshBasicMaterial;
+    if (!air) { mat.opacity = Math.max(0, mat.opacity - 0.12); ds.visible = mat.opacity > 0.01; return; }
+    const from = P.renderPos.clone().add(new THREE.Vector3(0, 0.3, 0));
+    const hit = this.physics.raycast(from, new THREE.Vector3(0, -1, 0), 160);
+    if (!hit) { ds.visible = false; return; }
+    const drop = hit.distance - 0.3;
+    const want = 0.62 * (1 - THREE.MathUtils.smoothstep(drop, 25, 140)) * THREE.MathUtils.smoothstep(drop, 0.25, 1.2);
+    mat.opacity += (want - mat.opacity) * 0.3;
+    ds.visible = mat.opacity > 0.01;
+    ds.position.copy(hit.point).addScaledVector(hit.normal, 0.04);
+    ds.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), hit.normal);
+    ds.scale.setScalar(0.85 + Math.min(1.6, drop * 0.02));
+  }
+
+  private setHudMap(m: MapData) {
+    this.hudMap = m;
+    const y0 = m.origin[1];
+    this.ui.setupHUD(m.zones, y0, y0 + m.height, this.save.personalBest);
   }
 
   private async loadCharacter(id: CharId) {
@@ -249,12 +318,23 @@ export class Game {
     this.onResize();
   }
 
-  // ---- adaptive resolution: keep the frame rate up on phones by lowering render resolution
+  // ---- adaptive performance: lower the render resolution first, then (if the player never picked a
+  // quality by hand) step the quality preset down. The lowered level is remembered for the next visit.
+  private static AUTOQ_KEY = 'skyward-parkour.autoq';
+  private autoQualityStart(): Quality {
+    const det = detectDefaultQuality();
+    try {
+      const v = localStorage.getItem(Game.AUTOQ_KEY) as Quality | null;
+      if (v === 'low' || v === 'medium' || v === 'high') return minQuality(det, v);
+    } catch { /* storage unavailable */ }
+    return det;
+  }
   private dynScale = 1;
   private dynTimer = 0;
   private fpsWindow: number[] = [];
+  private slowWindows = 0;
   private adaptResolution(dt: number) {
-    if (this.state !== 'playing') return;
+    if (this.state !== 'playing') { this.fpsWindow = []; this.dynTimer = 0; return; }
     this.fpsWindow.push(dt);
     this.dynTimer += dt;
     if (this.dynTimer < 2) return;
@@ -262,9 +342,28 @@ export class Game {
     this.fpsWindow = [];
     this.dynTimer = 0;
     const target = this.isTouch ? 30 : 50;
+    const minScale = 0.6;
     let next = this.dynScale;
-    if (avg < target * 0.85) next = Math.max(0.65, this.dynScale - 0.1);
-    else if (avg > target * 1.45) next = Math.min(1, this.dynScale + 0.08);
+    if (avg < target * 0.85) {
+      next = Math.max(minScale, this.dynScale - 0.12);
+      if (this.dynScale <= minScale + 1e-3) this.slowWindows++;
+    } else {
+      this.slowWindows = 0;
+      if (avg > target * 1.45) next = Math.min(1, this.dynScale + 0.08);
+    }
+    if (this.slowWindows >= 2 && this.save.settings.quality == null) {
+      const lower = lowerQuality(this.quality);
+      if (lower) {
+        this.slowWindows = 0;
+        this.applyQuality(lower);
+        this.dynScale = 0.85;
+        this.onResize();
+        try { localStorage.setItem(Game.AUTOQ_KEY, lower); } catch { /* ignore */ }
+        this.ui.toast('Đã giảm chất lượng đồ hoạ', 'Để game chạy mượt hơn — đổi lại trong Cài đặt');
+        this.ui.bindSave(this.save, this.quality);
+        return;
+      }
+    }
     if (Math.abs(next - this.dynScale) > 0.01) {
       this.dynScale = next;
       this.onResize();
@@ -274,10 +373,12 @@ export class Game {
   private onResize() {
     const w = window.innerWidth, h = window.innerHeight;
     const p = QUALITY_PRESETS[this.quality];
-    this.renderer.setPixelRatio(Math.max(0.5, Math.min(window.devicePixelRatio, p.pixelRatio) * this.dynScale));
+    const budget = Math.sqrt(p.maxPixels / Math.max(1, w * h));
+    this.renderer.setPixelRatio(Math.max(0.5, Math.min(window.devicePixelRatio, p.pixelRatio, budget) * this.dynScale));
     this.renderer.setSize(w, h);
     this.cam.camera.aspect = w / h;
-    this.cam.camera.fov = w < h ? 72 : 60;
+    this.cam.baseFov = w < h ? 72 : 60;
+    this.cam.camera.fov = this.cam.baseFov;
     this.cam.camera.updateProjectionMatrix();
     if (this.composer) { this.composer.setPixelRatio(this.renderer.getPixelRatio()); this.composer.setSize(w, h); }
     this.fx.dust.setViewport(h);
@@ -285,12 +386,21 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ flow
-  start() {
+  async start(mapId = 'map001') {
     // phones: go fullscreen + landscape straight from the START tap (needs the user gesture)
     if (this.isTouch && fullscreenSupported() && !isFullscreen()) enterFullscreen();
     this.audio.init();
     this.audio.setVolume(this.save.settings.volume);
     this.ui.hideMenu();
+    if (mapId !== 'map001' && !this.maps.map(mapId)) {
+      this.ui.showLoading('Đang dựng Rooftop City…');
+      await this.loadOtherMaps();
+      this.ui.hideLoading();
+    }
+    const m = this.maps.map(mapId) ?? this.maps.map('map001')!;
+    this.startMap = m.id;
+    this.player.spawnPoint.set(...m.spawn.p);
+    this.player.spawnYaw = m.spawn.yaw;
     this.ui.showHUD(true);
     this.touch?.setVisible(true);
     this.restart();
@@ -308,7 +418,15 @@ export class Game {
     this.reachedMilestones.clear();
     this.reachedZones.clear();
     this.fx.milestones.forEach((m) => (m.reached = false));
-    this.finishedThisRun = false;
+    this.finishedMaps.clear();
+    // a run that starts in the city counts the village as done (and its milestones as passed)
+    if (this.startMap !== 'map001') {
+      this.finishedMaps.add('map001');
+      for (const ms of this.maps.map('map001')?.milestones ?? []) this.reachedMilestones.add(ms);
+      this.score.runMax = Math.max(this.score.runMax, this.player.spawnPoint.y);
+    }
+    const sm = this.maps.map(this.startMap);
+    if (sm && sm !== this.map) { this.map = sm; this.setHudMap(sm); }
     this.lastZone = null;
     this.acc = 0;
     if (this.state === 'paused') { this.state = 'playing'; this.input.enabled = true; }
@@ -348,20 +466,38 @@ export class Game {
     this.ui.showMenu(this.save, this.makePortraits(), this.quality);
   }
 
-  private finish() {
-    this.finishedThisRun = true;
-    const firstTime = !this.save.highestMap;
-    this.save.highestMap = 'map001';
-    this.save.completions++;
+  private finish(md: MapData) {
+    this.finishedMaps.add(md.id);
     const t = this.score.playTime;
-    if (!this.save.bestTime || t < this.save.bestTime) this.save.bestTime = t;
+    const order = ['map001', 'map002'];
+    const firstTime = !this.save.highestMap || order.indexOf(this.save.highestMap) < order.indexOf(md.id);
+    if (firstTime) this.save.highestMap = md.id;
+    this.save.bestTimes = this.save.bestTimes ?? {};
+    const prevBest = this.save.bestTimes[md.id] ?? (md.id === 'map001' ? this.save.bestTime ?? undefined : undefined);
+    // a run started in the city does not count for village-to-city times
+    const valid = md.id === 'map001' || this.startMap === 'map001';
+    if (valid && (!prevBest || t < prevBest)) this.save.bestTimes[md.id] = t;
+    if (md.id === 'map001') { this.save.completions++; if (!this.save.bestTime || t < this.save.bestTime) this.save.bestTime = t; }
     writeSave(this.save);
     this.audio.fanfare();
-    this.fx.burst(this.fx.exitPos.clone(), '#9fe8ff');
+    this.fx.burst(new THREE.Vector3(...md.exit.p), '#9fe8ff');
+    const next = this.maps.map(md.exit.next);
+    if (next) {
+      // seamless: no stopping – the gate leads straight on
+      this.ui.toast(`Chinh phục ${md.name}!`, `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')} · Đi qua cổng sang ${next.name}`, true, 4200);
+      return;
+    }
     this.state = 'finished';
     this.input.enabled = false;
     this.input.releasePointer();
-    this.ui.showFinish({ time: t, best: this.save.personalBest, bestTime: this.save.bestTime, firstTime }, () => { this.state = 'playing'; this.input.enabled = true; this.clock.getDelta(); }, () => { this.state = 'playing'; this.input.enabled = true; this.restart(); });
+    const isCity = md.id === 'map002';
+    this.ui.showFinish({
+      title: isCity ? 'Chinh phục Rooftop City!' : 'Chinh phục Map 001!',
+      time: t, best: this.save.personalBest, bestTime: this.save.bestTimes[md.id] ?? null, firstTime,
+      next: isCity ? 'Cổng sang <b>Map 003</b><br><span style="font-weight:400;font-size:13px">Sẽ mở trong bản cập nhật tiếp theo. Thử tìm 3 đường tắt của thành phố để về đích nhanh hơn!</span>'
+        : 'Cổng sang <b>Map 002 – Rooftop City</b><br><span style="font-weight:400;font-size:13px">Đang tải thành phố… thử lại sau giây lát.</span>',
+      hint: isCity ? 'Gợi ý: có một mái nhà ẩn phía sau cần cẩu…' : 'Gợi ý: Map 001 có 3 đường tắt khó – bạn đã tìm thấy đường nào chưa?',
+    }, () => { this.state = 'playing'; this.input.enabled = true; this.clock.getDelta(); }, () => { this.state = 'playing'; this.input.enabled = true; this.restart(); });
   }
 
   // ------------------------------------------------------------------ loop
@@ -380,6 +516,9 @@ export class Game {
 
     if (this.state === 'playing') this.updatePlaying(dt);
     else if (this.state === 'menu' || this.state === 'loading') {
+      this.simTime += dt;
+      this.maps.stepMovers(this.simTime, dt);
+      this.maps.syncMovers(1);
       const m = this.player.model;
       if (m) { m.play('idle'); m.update(dt); m.root.position.copy(this.player.spawnPoint); m.root.rotation.y = this.player.spawnYaw; }
       const sp = this.player.spawnPoint;
@@ -394,7 +533,7 @@ export class Game {
     this.env.update(dt, this.time, this.cam.camera, focus);
     this.clouds.update(dt, this.time, this.cam.camera.position, this.env.sunTint);
     this.fx.update(dt, this.time);
-    this.maps.update(this.time, this.cam.camera.position, this.env.sunTint);
+    this.maps.update(this.time, this.cam.camera.position, this.env.sunTint, dt);
     this.audio.update(dt, this.state === 'playing' ? this.player.feetY : 0, this.state === 'playing' ? -this.player.vel.y : 0, this.time);
 
     if (this.composer) this.composer.render(dt);
@@ -408,6 +547,8 @@ export class Game {
     this.acc += dt;
     let steps = 0;
     while (this.acc >= PHYS.fixedDt && steps < PHYS.maxSubSteps) {
+      this.simTime += PHYS.fixedDt;
+      this.maps.stepMovers(this.simTime, PHYS.fixedDt);
       this.player.fixedUpdate(PHYS.fixedDt, this.input, this.cam.yaw);
       this.physics.step();
       this.acc -= PHYS.fixedDt;
@@ -415,41 +556,81 @@ export class Game {
     }
     if (steps >= PHYS.maxSubSteps) this.acc = 0;
     const alpha = this.acc / PHYS.fixedDt;
+    this.maps.syncMovers(alpha);
     this.player.syncVisual(alpha, dt);
     this.touch?.setHanging(this.player.isHanging);
 
     for (const e of this.player.drainEvents()) this.onPlayerEvent(e);
 
     const feet = this.player.renderPos;
-    const height = this.player.feetY - this.map.origin[1];
+    // which map are we in? (seamless world: village below, city beside it above the clouds)
+    const here = this.maps.mapAt(feet.x, feet.y, feet.z, this.map);
+    if (here && here !== this.map) {
+      const fellBack = here.origin[1] < this.map.origin[1];
+      this.map = here;
+      this.setHudMap(here);
+      if (fellBack) this.ui.toast(`Rơi xuống ${here.name}`, `Kỷ lục lượt này vẫn giữ: ${Math.floor(this.score.runMax)} m — leo lại thôi!`, false, 3600);
+      else if (here.id !== 'map001') this.ui.toast(here.name, `Map ${here.id.slice(3)} · ${here.origin[1]}–${here.origin[1] + here.height} m`, true, 3200);
+    }
+    const height = this.player.feetY;
     if (this.score.update(dt, height)) { this.ui.toast('Kỷ lục mới!', `Vượt kỷ lục cá nhân cũ`, true); this.audio.chime(); }
 
-    // milestones
-    for (const m of this.map.milestones) {
-      if (!this.reachedMilestones.has(m) && this.score.runMax >= m) {
-        this.reachedMilestones.add(m);
-        const ms = this.fx.milestones.find((x) => Math.abs(x.y - m) < 0.1);
-        if (ms) { ms.reached = true; this.fx.burst(ms.sprite.position.clone()); }
-        this.ui.toast(`Mốc ${m} m!`, m >= this.map.height ? 'Đỉnh Starter Village' : 'Tiếp tục leo lên', true);
-        this.audio.chime();
+    // milestones (all loaded maps)
+    for (const md of [this.maps.map('map001'), this.maps.map('map002')]) {
+      if (!md) continue;
+      for (const m of md.milestones) {
+        if (!this.reachedMilestones.has(m) && this.score.runMax >= m) {
+          this.reachedMilestones.add(m);
+          const ms = this.fx.milestones.find((x) => Math.abs(x.y - m) < 0.1);
+          if (ms) { ms.reached = true; this.fx.burst(ms.sprite.position.clone()); }
+          const top = md.origin[1] + md.height;
+          this.ui.toast(`Mốc ${m} m!`, m >= top ? `Đỉnh ${md.name}` : 'Tiếp tục leo lên', true);
+          this.audio.chime();
+        }
       }
     }
     // zones
-    const z = this.maps.zoneAt(height);
+    const z = this.maps.zoneAt(height, this.map);
     if (z) {
-      if (!this.reachedZones.has(z.zone.id)) {
-        this.reachedZones.add(z.zone.id);
-        if (z.zone.id !== 'A') this.ui.toast(`Khu ${z.zone.id}`, z.zone.name);
+      const key = `${z.map.id}:${z.zone.id}`;
+      if (!this.reachedZones.has(key)) {
+        this.reachedZones.add(key);
+        if (!(z.map.id === 'map001' && z.zone.id === 'A')) this.ui.toast(`Khu ${z.zone.id}`, z.zone.name);
       }
       this.lastZone = z.zone;
     }
-    // exit gate to Map 002
-    const ex = this.map.exit;
-    if (!this.finishedThisRun && Math.hypot(feet.x - ex.p[0], feet.y - ex.p[1], feet.z - ex.p[2]) < ex.r) this.finish();
+    // map exits
+    for (const md of [this.maps.map('map001'), this.maps.map('map002')]) {
+      if (!md || this.finishedMaps.has(md.id)) continue;
+      const ex = md.exit;
+      if (Math.hypot(feet.x - ex.p[0], feet.y - ex.p[1], feet.z - ex.p[2]) < ex.r) this.finish(md);
+    }
 
-    const falling = this.player.state === 'air' && this.player.vel.y < -12;
-    this.ui.setSpeedLines(this.player.state === 'air' ? Math.max(0, (-this.player.vel.y - 18) / 22) : 0);
-    this.cam.update(dt, feet, this.player.yaw, this.player.speed > 0.5, falling);
+    const P = this.player;
+    // camera phase: run / jump (steady horizon) / fall (see below) / hang (see the lip) / pad (launch framing)
+    let camMode: CamMode = 'run';
+    if (P.state === 'hang') camMode = 'hang';
+    else if (P.state === 'air') camMode = P.padFlight && P.vel.y > -10 ? 'pad' : P.padFlight || P.vel.y < -14 || P.feetY < P.airBaseY - 0.4 ? 'fall' : 'jump';
+    const iy = this.input.moveY, ix = this.input.moveX;
+    const alignOK = P.state === 'ground' && P.speed > 3.5 && iy > 0.6 && Math.abs(ix) < 0.3;
+    this.ui.setSpeedLines(P.state === 'air' ? Math.max(0, (-P.vel.y - 18) / 22, P.padFlight && P.vel.y > 6 ? 0.35 : 0) : 0);
+    // camera dynamics: pad launch (pull back + wider), apex (steady), descent (tilt toward the landing), long falls
+    let cd = 0, cf = 0, cpitch = 0, sharp = 4;
+    if (P.padFlight && P.state === 'air') {
+      if (P.vel.y > 5) { cd = 1.8; cf = 8; sharp = 6; }
+      else if (P.vel.y > -5) { cd = 1.4; cf = 5; sharp = 3; }
+      else { cd = 1.0; cf = 4; cpitch = 0.2; sharp = 3; }
+      if (Math.random() < 0.5) this.fx.sparkles.emit(P.pos.clone().add(new THREE.Vector3(0, -0.2, 0)), 1, { speed: 0.4, up: -0.2, life: 0.35, size: 0.22 });
+    }
+    if (P.state === 'air' && P.vel.y < -14) {
+      const f = Math.min(1, (-P.vel.y - 14) / 22);
+      cf += 10 * f; cpitch += 0.12 * f; cd += 0.8 * f; sharp = Math.max(sharp, 3);
+      if (P.vel.y < -30) this.cam.addShake(dt * 0.6);
+    }
+    if (camMode === 'hang') { cd = 0.9; cpitch = 0.12; sharp = 3; }
+    this.cam.setEffects(cd, cf, cpitch, sharp);
+    this.updateDropShadow();
+    this.cam.update(dt, feet, P.yaw, camMode, { airBaseY: P.airBaseY, alignOK });
 
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) {
@@ -464,6 +645,7 @@ export class Game {
   }
 
   private hangTipShown = false;
+  private ladderTipShown = false;
 
   private onPlayerEvent(e: ReturnType<Player['drainEvents']>[number]) {
     const feet = this.player.renderPos.clone();
@@ -504,6 +686,30 @@ export class Game {
         break;
       case 'rescue':
         this.ui.toast('Đã đưa về làng', 'Bạn rơi ra ngoài thế giới');
+        break;
+      case 'unstuck':
+        this.ui.toast('Đã thoát chỗ kẹt', 'Nhân vật được đưa ra ngoài công trình');
+        break;
+      case 'pad':
+        if (e.kind === 'jump') { this.audio.clank(); this.fx.sparkles.emit(feet.clone().add(new THREE.Vector3(0, 0.2, 0)), 22, { speed: 3.2, up: 1.2, life: 0.6, size: 0.3 }); this.haptic(12); }
+        else { this.audio.whoosh(); this.fx.dust.emit(feet, 8, { speed: 2.5, up: 0.4, life: 0.5, size: 0.4 }); this.haptic(12); }
+        break;
+      case 'launch':
+        this.audio.boing();
+        this.fx.sparkles.emit(feet.clone().add(new THREE.Vector3(0, 0.3, 0)), 18, { speed: 2.5, up: 6, life: 0.9, size: 0.35 });
+        this.haptic(25);
+        break;
+      case 'ring':
+        this.audio.whoosh();
+        this.fx.sparkles.emit(this.player.pos.clone(), 18, { speed: 4, up: 1, life: 0.8, size: 0.4 });
+        this.haptic(15);
+        break;
+      case 'ladder':
+        this.audio.clank();
+        if (!this.ladderTipShown) {
+          this.ladderTipShown = true;
+          this.ui.toast('Đang bám thang', this.isTouch ? 'Đẩy cần lên/xuống: leo · NHẢY: bật ra · THẢ: buông' : 'W/S: leo lên/xuống · Space: bật ra · E: buông', false, 3800);
+        }
         break;
     }
   }

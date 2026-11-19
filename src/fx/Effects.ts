@@ -333,6 +333,53 @@ export class Effects {
     }
   }
 
+  /** Swirling sky portal (map exit gate) of radius s, facing yaw r (normal = local +Z). */
+  addPortal(c: THREE.Vector3, s: number, rotDeg: number) {
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color('#9fe8ff') } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: `uniform float uTime; uniform vec3 uColor; varying vec2 vUv;
+        void main(){
+          vec2 p = vUv * 2.0 - 1.0; float r = length(p); if (r > 1.0) discard;
+          float a = atan(p.y, p.x);
+          float sw = sin(a * 5.0 + r * 9.0 - uTime * 3.0) * 0.5 + 0.5;
+          float core = smoothstep(1.0, 0.0, r);
+          vec3 col = mix(uColor, vec3(1.0, 0.85, 0.55), sw * 0.45) * (0.45 + core * 0.9);
+          float alpha = (0.35 + 0.45 * sw) * smoothstep(1.0, 0.82, r) + core * 0.25;
+          gl_FragColor = vec4(col, alpha);
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    this.beamMats.push(mat);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(s, 48), mat);
+    disc.position.copy(c);
+    disc.rotation.y = THREE.MathUtils.degToRad(rotDeg);
+    disc.renderOrder = 6;
+    this.group.add(disc);
+    this.addGlow(c.clone(), s * 3.2, '150,220,255');
+    this.spawners.push({ p: c.clone(), rate: 16, acc: 0, kind: 'sparkle', r: s * 0.8 });
+    const beamH = 120;
+    const bg = new THREE.CylinderGeometry(s * 0.35, s * 0.7, beamH, 24, 1, true);
+    bg.translate(0, beamH / 2, 0);
+    const bm = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color('#ffd9a0') } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: BEAM_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    this.beamMats.push(bm);
+    const beam = new THREE.Mesh(bg, bm);
+    beam.position.copy(c).add(new THREE.Vector3(0, s, 0));
+    beam.renderOrder = 7;
+    this.group.add(beam);
+  }
+
   addGlow(p: THREE.Vector3, s: number, color = '255,214,140') {
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: T.glowTex(color), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 }));
     glow.position.copy(p);

@@ -17,7 +17,37 @@ export const PREFAB_FILES: Record<string, string> = {
   stone_arch_gate: 'assets/map001/stone_arch_gate',
   wooden_village_gate: 'assets/map001/wooden_village_gate',
   crystal_blue_shrine: 'assets/map001/crystal_blue_shrine',
+  // Map 002 – Rooftop City
+  brick_building: 'assets/map002/brick_building',
+  crane_tower: 'assets/map002/crane_tower',
+  hover_platform: 'assets/map002/hover_platform',
+  railing_barrier: 'assets/map002/railing_barrier',
+  wooden_crate: 'assets/map002/wooden_crate',
+  jump_pad: 'assets/map002/jump_pad',
+  speed_pad: 'assets/map002/speed_pad',
+  speed_ring: 'assets/map002/speed_ring',
+  vent_unit: 'assets/map002/vent_unit',
+  water_tower: 'assets/map002/water_tower',
+  brick_apartment_building: 'assets/map002/brick_apartment_building',
+  yellow_apartment_building: 'assets/map002/yellow_apartment_building',
+  tall_office_tower: 'assets/map002/tall_office_tower',
+  clock_energy_tower: 'assets/map002/clock_energy_tower',
+  portal_gateway_shrine: 'assets/map002/portal_gateway_shrine',
+  cargo_crane_tower: 'assets/map002/cargo_crane_tower',
+  curved_industrial_vent: 'assets/map002/curved_industrial_vent',
+  horizontal_ventilation_duct: 'assets/map002/horizontal_ventilation_duct',
+  industrial_billboard_platform: 'assets/map002/industrial_billboard_platform',
+  wall_industrial_stairs: 'assets/map002/wall_industrial_stairs',
+  brick_vent_tower: 'assets/map002/brick_vent_tower',
+  rooftop_clothesline_platform: 'assets/map002/rooftop_clothesline_platform',
+  rooftop_greenhouse: 'assets/map002/rooftop_greenhouse',
+  satellite_dish_tower: 'assets/map002/satellite_dish_tower',
+  street_light_post: 'assets/map002/street_light_post',
+  wall_neon_signboard: 'assets/map002/wall_neon_signboard',
 };
+
+/** Self-lit prefabs (neon, lamps, the portal): emissive = their own colour texture. */
+const EMISSIVE: Record<string, number> = { wall_neon_signboard: 1.1, street_light_post: 0.35, portal_gateway_shrine: 0.35, clock_energy_tower: 0.12, industrial_billboard_platform: 0.18 };
 
 type Batch = {
   id: string;
@@ -67,6 +97,13 @@ export class PrefabSystem {
         mat.envMapIntensity = 0.55;
         mat.roughness = 0.92;
         mat.metalness = 0;
+        const em = EMISSIVE[id];
+        if (em && mat.map) {
+          mat.emissive = new THREE.Color('#ffffff');
+          mat.emissiveIntensity = em;
+          mat.emissiveMap = mat.map;
+          mat.needsUpdate = true;
+        }
         return { g, mat };
       };
       const a = prepare(lod0Mesh);

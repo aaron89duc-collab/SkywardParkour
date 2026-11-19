@@ -138,9 +138,11 @@ export class Clouds {
     for (let i = 0; i < count; i++) {
       const k = i / count;
       let r: number, y: number, w: number, o: number;
-      if (k < 0.38) { r = 92 + rnd() * 200; y = cloudSeaY + 6 + rnd() * 34; w = 45 + rnd() * 70; o = 0.85; } // around the plateau, near the cloud sea
-      else if (k < 0.8) { r = 45 + rnd() * 260; y = 15 + rnd() * 170; w = 22 + rnd() * 40; o = 0.55 + rnd() * 0.3; } // drifting through the climb
-      else { r = 420 + rnd() * 500; y = -10 + rnd() * 160; w = 120 + rnd() * 180; o = 0.9; } // horizon
+      if (k < 0.3) { r = 92 + rnd() * 200; y = cloudSeaY + 6 + rnd() * 34; w = 45 + rnd() * 70; o = 0.85; } // around the plateau, near the cloud sea
+      else if (k < 0.62) { r = 45 + rnd() * 260; y = 15 + rnd() * 120; w = 22 + rnd() * 40; o = 0.55 + rnd() * 0.3; } // drifting through the village climb
+      else if (k < 0.72) { r = 130 + rnd() * 160; y = 92 + rnd() * 40; w = 30 + rnd() * 45; o = 0.5 + rnd() * 0.3; } // a layer under the sky city: depth when looking down
+      else if (k < 0.82) { r = 150 + rnd() * 260; y = 150 + rnd() * 190; w = 26 + rnd() * 50; o = 0.45 + rnd() * 0.3; } // high cumulus around the city
+      else { r = 420 + rnd() * 500; y = -10 + rnd() * 260; w = 120 + rnd() * 180; o = 0.9; } // horizon
       const a = rnd() * Math.PI * 2;
       pos.set([Math.cos(a) * r, y, Math.sin(a) * r], i * 3);
       size[i * 2] = w; size[i * 2 + 1] = w;

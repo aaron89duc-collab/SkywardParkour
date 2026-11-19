@@ -28,6 +28,10 @@ export class Input {
   private lastMouse = { x: 0, y: 0 };
   onPointerLockLost: (() => void) | null = null;
   lastInputTime = 0;
+  /** real (event-timestamped) duration of the last completed jump press, seconds; consumed by the player.
+   *  Lets a 30 FPS phone and a 144 Hz PC turn the same tap into the same jump arc. */
+  private jumpDownAt = -1;
+  private heldFor: number | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => this.onKey(e, true));
@@ -71,11 +75,12 @@ export class Input {
       if (e.repeat) return;
       this.keys.add(k);
       this.lastInputTime = performance.now();
-      if (k === 'Space') this.jumpLatch = true;
+      if (k === 'Space') this.pressJump(e.timeStamp);
       if (k === 'KeyE' || k === 'ShiftLeft' || k === 'ShiftRight') this.dropLatch = true;
       if (k === 'Escape' || k === 'KeyP') this.pauseLatch = true;
     } else {
       this.keys.delete(k);
+      if (k === 'Space') this.releaseJump(e.timeStamp);
     }
   }
 
@@ -105,7 +110,9 @@ export class Input {
     this.jumpHeld = k.has('Space') || this.touchJumpHeld;
   }
 
-  pressJump() { this.jumpLatch = true; this.lastInputTime = performance.now(); }
+  pressJump(at = performance.now()) { this.jumpLatch = true; this.lastInputTime = performance.now(); this.jumpDownAt = at; this.heldFor = null; }
+  releaseJump(at = performance.now()) { if (this.jumpDownAt >= 0) this.heldFor = Math.max(0, (at - this.jumpDownAt) / 1000); this.jumpDownAt = -1; }
+  consumeHeldFor() { const v = this.heldFor; this.heldFor = null; return v; }
   pressDrop() { this.dropLatch = true; }
   pressPause() { this.pauseLatch = true; }
 

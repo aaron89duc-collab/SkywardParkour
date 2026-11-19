@@ -30,6 +30,26 @@ for (const node of doc.getRoot().listNodes()) {
   const parent = node.getParentNode(); if (parent) { parent.removeChild(node); scene.addChild(node); }
 }
 b = getBounds(scene);
+// optional: cut away triangles whose centroid lies in a box (normalised coords), e.g. CUT="-0.56,-0.31,0.38,0.775,-0.2,0.2"
+if (process.env.CUT) {
+  const [x0, x1, y0, y1, z0, z1] = process.env.CUT.split(',').map(Number);
+  for (const mesh of doc.getRoot().listMeshes()) for (const prim of mesh.listPrimitives()) {
+    const P = prim.getAttribute('POSITION'), I = prim.getIndices();
+    const a = [0, 0, 0], bb = [0, 0, 0], c = [0, 0, 0];
+    const keep = [];
+    let cut = 0;
+    for (let t = 0; t < I.getCount(); t += 3) {
+      const i0 = I.getScalar(t), i1 = I.getScalar(t + 1), i2 = I.getScalar(t + 2);
+      P.getElement(i0, a); P.getElement(i1, bb); P.getElement(i2, c);
+      const cx = (a[0] + bb[0] + c[0]) / 3, cy = (a[1] + bb[1] + c[1]) / 3, cz = (a[2] + bb[2] + c[2]) / 3;
+      if (cx > x0 && cx < x1 && cy > y0 && cy < y1 && cz > z0 && cz < z1) { cut++; continue; }
+      keep.push(i0, i1, i2);
+    }
+    const arr = P.getCount() > 65535 ? new Uint32Array(keep) : new Uint16Array(keep);
+    I.setArray(arr);
+    console.log('  cut', cut, 'triangles');
+  }
+}
 // --- collision mesh
 const pos = [], idx = [];
 for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {

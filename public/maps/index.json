@@ -1,1 +1,4 @@
-[{ "id": "map001", "name": "Starter Village", "file": "maps/map001.json", "yMin": -70, "yMax": 150 }]
+[
+  { "id": "map001", "name": "Starter Village", "file": "maps/map001.json", "yMin": -70, "yMax": 141.5 },
+  { "id": "map002", "name": "Rooftop City", "file": "maps/map002.json", "yMin": 141.5, "yMax": 400 }
+]

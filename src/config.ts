@@ -11,16 +11,19 @@ export const PHYS = {
 
   // Jump: v = sqrt(2 * gUp * apex) -> apex ~2.55 m (tap = lower hop, hold = full height)
   jumpVelocity: 12.4,
-  jumpCutMultiplier: 0.45, // variable jump height: releasing early cuts upward speed
-  coyoteTime: 0.12,
-  jumpBuffer: 0.14,
+  // Variable jump, decided only by how long the button was held (frame-rate independent, same tap = same arc):
+  // released within jumpHoldWindow -> apex between jumpMinApex and the full apex; held longer -> full jump.
+  jumpHoldWindow: 0.18,
+  jumpMinApex: 1.5,
+  coyoteTime: 0.1,
+  jumpBuffer: 0.12,
 
   runSpeed: 7.0,
   walkSpeed: 3.0,
   groundAccel: 55,
-  groundDecel: 65,
-  airAccel: 22, // air control: can steer, but not snap direction
-  airDecel: 7, // releasing the stick in the air bleeds drift (helps landing on small platforms)
+  groundDecel: 50, // release the stick: stop quickly (~0.14 s from a run) without a jolt
+  airAccel: 20, // air control ~35% of the ground: steer and brake, never snap direction
+  airDecel: 1.5, // stick released mid-air: momentum is kept (a slipping thumb does not kill the jump)
   turnSpeedGround: 14,
   turnSpeedAir: 5,
 
@@ -42,6 +45,7 @@ export const PHYS = {
     climbTime: 0.95,
     lowerTime: 0.75, // climbing down from a top into a hang
     maxUpVelocity: 7.0,
+    assist: 0.2, // smart grab: ledge up to this much above reach at the apex, or this far to the side, still catches
     catchMaxFallSpeed: 17, // falling slower than this past an edge -> auto catch
     mantleMinRel: 0.3, // ledge just above the feet while airborne -> pull up instead of falling
     mantleMaxRel: 1.25,
@@ -83,14 +87,39 @@ export const COLLISION = {
 
 export type Quality = 'low' | 'medium' | 'high';
 
+/** WebGL renderer string (e.g. "ANGLE (Intel, Intel(R) UHD Graphics 620 ...)"). */
+export function gpuName(): string {
+  try {
+    const c = document.createElement('canvas');
+    const gl = (c.getContext('webgl2') || c.getContext('webgl')) as WebGLRenderingContext | null;
+    if (!gl) return '';
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    return String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+  } catch { return ''; }
+}
+
+const QUALITY_ORDER: Quality[] = ['low', 'medium', 'high'];
+export function lowerQuality(q: Quality): Quality | null {
+  const i = QUALITY_ORDER.indexOf(q);
+  return i > 0 ? QUALITY_ORDER[i - 1] : null;
+}
+export function minQuality(a: Quality, b: Quality): Quality {
+  return QUALITY_ORDER.indexOf(a) < QUALITY_ORDER.indexOf(b) ? a : b;
+}
+
 export function detectDefaultQuality(): Quality {
   const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 1100);
   if (mobile) return 'low';
-  return 'high';
+  const gpu = gpuName().toLowerCase();
+  if (/swiftshader|llvmpipe|software|basic render|microsoft basic/.test(gpu)) return 'low';
+  // discrete GPUs (and Apple Pro/Max chips) get the full look; integrated graphics start at medium
+  if (/nvidia|geforce|rtx|gtx|quadro|radeon rx|radeon pro|arc\(tm\) a|arc a\d|apple m\d (pro|max|ultra)/.test(gpu)) return 'high';
+  return 'medium';
 }
 
-export const QUALITY_PRESETS: Record<Quality, { pixelRatio: number; shadows: boolean; shadowMap: number; bloom: boolean; clouds: number; grass: number; lodDistance: number; antialias: boolean }> = {
-  low: { pixelRatio: 1, shadows: true, shadowMap: 1024, bloom: false, clouds: 70, grass: 0.45, lodDistance: 28, antialias: false },
-  medium: { pixelRatio: 1.5, shadows: true, shadowMap: 2048, bloom: false, clouds: 110, grass: 0.75, lodDistance: 45, antialias: true },
-  high: { pixelRatio: 2, shadows: true, shadowMap: 2048, bloom: true, clouds: 150, grass: 1, lodDistance: 65, antialias: true },
+export const QUALITY_PRESETS: Record<Quality, { pixelRatio: number; maxPixels: number; shadows: boolean; shadowMap: number; bloom: boolean; clouds: number; grass: number; lodDistance: number; antialias: boolean }> = {
+  // maxPixels caps the drawing buffer (CSS px * pixelRatio^2): a 4K / retina laptop would otherwise draw 8+ MP
+  low: { pixelRatio: 1, maxPixels: 0.95e6, shadows: true, shadowMap: 1024, bloom: false, clouds: 70, grass: 0.45, lodDistance: 22, antialias: false },
+  medium: { pixelRatio: 1.5, maxPixels: 2.0e6, shadows: true, shadowMap: 2048, bloom: false, clouds: 100, grass: 0.75, lodDistance: 34, antialias: true },
+  high: { pixelRatio: 2, maxPixels: 3.6e6, shadows: true, shadowMap: 2048, bloom: true, clouds: 140, grass: 1, lodDistance: 52, antialias: true },
 };

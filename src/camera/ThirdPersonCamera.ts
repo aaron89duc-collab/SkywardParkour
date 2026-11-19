@@ -2,6 +2,15 @@ import * as THREE from 'three';
 import { CAMERA } from '../config';
 import { Physics } from '../core/Physics';
 
+/** Camera behaviour per player phase. None of them ever turns the camera sideways on its own while airborne. */
+export type CamMode = 'run' | 'jump' | 'fall' | 'hang' | 'pad';
+export interface CamInfo {
+  /** feet height where the airborne phase began (jump framing) */
+  airBaseY: number;
+  /** grounded, running fast and straight with the stick: the only case where auto-align may act */
+  alignOK: boolean;
+}
+
 /** Orbit camera behind the player, smooth follow, mouse/touch rotation, zoom, wall collision. */
 export class ThirdPersonCamera {
   camera: THREE.PerspectiveCamera;
@@ -14,8 +23,24 @@ export class ThirdPersonCamera {
   private shake = 0;
   private dir = new THREE.Vector3();
   private desired = new THREE.Vector3();
-  autoFollow = false; // gentle auto-rotation behind the player (touch)
+  autoFollow = false; // very gentle auto-align behind the player while running straight on the ground (setting)
   private idleLook = 0;
+  mode: CamMode = 'run';
+  private lift = 0;
+  /** base field of view (set on resize); effects add to it */
+  baseFov: number = CAMERA.fov;
+  private fxDist = 0;
+  private fxFov = 0;
+  private fxPitch = 0;
+  private fxGoal = { dist: 0, fov: 0, pitch: 0, sharp: 4 };
+
+  /** Dynamic framing: pull back / widen / tilt down (pad launches, long falls). Smoothed. */
+  setEffects(dist: number, fov: number, pitch: number, sharpness = 4) {
+    this.fxGoal.dist = dist;
+    this.fxGoal.fov = fov;
+    this.fxGoal.pitch = pitch;
+    this.fxGoal.sharp = sharpness;
+  }
 
   constructor(private physics: Physics, aspect: number) {
     this.camera = new THREE.PerspectiveCamera(CAMERA.fov, aspect, 0.1, 2600);
@@ -38,33 +63,55 @@ export class ThirdPersonCamera {
     this.initialized = true;
   }
 
-  update(dt: number, feet: THREE.Vector3, playerYaw: number, moving: boolean, falling: boolean) {
-    const goal = new THREE.Vector3(feet.x, feet.y + CAMERA.targetHeight, feet.z);
+  update(dt: number, feet: THREE.Vector3, playerYaw: number, mode: CamMode, info: CamInfo) {
+    this.mode = mode;
+    // vertical framing per phase:
+    //  jump - follow only part of the rise so the horizon stays steady over a gap (no bobbing every hop)
+    //  fall - below the take-off height: follow fast, the landing surface below must stay visible
+    //  hang - a little higher, so the lip and the spot you will climb onto are in view
+    const th = CAMERA.targetHeight;
+    let gy = feet.y + th, sharp = CAMERA.verticalFollowSharpness, maxLag = 1.2;
+    if (mode === 'jump') {
+      const rise = feet.y - info.airBaseY;
+      if (rise > 0) { gy = info.airBaseY + rise * 0.45 + th; sharp = 8; maxLag = 1.9; }
+    } else if (mode === 'fall') sharp = 22;
+    const liftGoal = mode === 'hang' ? 0.35 : 0;
+    this.lift += (liftGoal - this.lift) * (1 - Math.exp(-6 * dt));
+    gy += this.lift;
+    const goal = new THREE.Vector3(feet.x, gy, feet.z);
     if (!this.initialized) { this.target.copy(goal); this.initialized = true; }
     const kh = 1 - Math.exp(-CAMERA.followSharpness * dt);
-    const kv = 1 - Math.exp(-(falling ? 22 : CAMERA.verticalFollowSharpness) * dt);
+    const kv = 1 - Math.exp(-sharp * dt);
     this.target.x += (goal.x - this.target.x) * kh;
     this.target.z += (goal.z - this.target.z) * kh;
     this.target.y += (goal.y - this.target.y) * kv;
     // keep the player inside the frame even at high fall speeds
-    const maxLag = 1.2;
-    const dy = goal.y - this.target.y;
-    if (Math.abs(dy) > maxLag) this.target.y = goal.y - Math.sign(dy) * maxLag;
+    const dy = feet.y + th + this.lift - this.target.y;
+    if (Math.abs(dy) > maxLag) this.target.y = feet.y + th + this.lift - Math.sign(dy) * maxLag;
 
-    // optional auto-follow behind the character (mobile comfort)
+    // optional auto-align behind the character: only when running straight on the ground, never in the air,
+    // and only after the player has left the camera alone for a while
     this.idleLook += dt;
-    if (this.autoFollow && moving && this.idleLook > 1.2) {
+    if (this.autoFollow && mode === 'run' && info.alignOK && this.idleLook > 1.5) {
       const behind = playerYaw + Math.PI;
       let d = ((behind - this.yaw + Math.PI) % (Math.PI * 2)) - Math.PI;
       if (d < -Math.PI) d += Math.PI * 2;
-      this.yaw += d * Math.min(1, dt * 0.9);
+      this.yaw += d * Math.min(1, dt * 0.45);
     }
 
-    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    const ke = 1 - Math.exp(-this.fxGoal.sharp * dt);
+    this.fxDist += (this.fxGoal.dist - this.fxDist) * ke;
+    this.fxFov += (this.fxGoal.fov - this.fxFov) * ke;
+    this.fxPitch += (this.fxGoal.pitch - this.fxPitch) * ke;
+    const fov = this.baseFov + this.fxFov;
+    if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    const pitch = THREE.MathUtils.clamp(this.pitch + this.fxPitch, CAMERA.pitchMin, CAMERA.pitchMax);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
     this.dir.set(Math.sin(this.yaw) * cp, sp, Math.cos(this.yaw) * cp).normalize();
     // collision: sphere sweep from the target toward the desired camera position
-    let allowed = this.distance;
-    const hit = this.physics.sphereCast(this.target, this.dir, this.distance, CAMERA.collisionRadius);
+    const want = this.distance + this.fxDist;
+    let allowed = want;
+    const hit = this.physics.sphereCast(this.target, this.dir, want, CAMERA.collisionRadius);
     if (hit !== null) allowed = Math.max(0.5, hit - 0.05);
     if (allowed < this.currentDist) this.currentDist = allowed; // snap in
     else this.currentDist = Math.min(allowed, this.currentDist + dt * 7); // ease out

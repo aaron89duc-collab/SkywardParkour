@@ -5,8 +5,11 @@ import type { MapData, MapRegistryEntry, ZoneData } from './MapTypes';
 import { KitBuilder } from './Kit';
 import { PrefabSystem } from './Prefabs';
 import { SpriteSystem, type AtlasRect } from './Sprites';
-import { buildTerrain } from './Terrain';
+import { buildTerrain, type Footprint } from './Terrain';
 import { Effects } from '../fx/Effects';
+import { MoverSystem } from './Movers';
+import { BoosterSystem, type Ladder } from './Boosters';
+import type RAPIER from '@dimforge/rapier3d-compat';
 
 type LoadedMap = {
   entry: MapRegistryEntry;
@@ -14,6 +17,8 @@ type LoadedMap = {
   group: THREE.Group;
   prefabs: PrefabSystem;
   sprites: SpriteSystem | null;
+  movers: MoverSystem;
+  boosters: BoosterSystem;
 };
 
 /**
@@ -26,6 +31,8 @@ export class MapManager {
   root = new THREE.Group();
   atlasTex: THREE.Texture | null = null;
   atlasRects: Record<string, AtlasRect> = {};
+  private ladderList: Ladder[] = [];
+  private loading = new Map<string, Promise<MapData>>();
 
   constructor(private assets: Assets, private physics: Physics, private scene: THREE.Scene, private fx: Effects) {
     this.root.name = 'maps';
@@ -43,7 +50,19 @@ export class MapManager {
     }
   }
 
-  async load(entry: MapRegistryEntry) {
+  /** Load a map once (concurrent callers share the same promise). */
+  load(entry: MapRegistryEntry): Promise<MapData> {
+    const done = this.loaded.get(entry.id);
+    if (done) return Promise.resolve(done.data);
+    let p = this.loading.get(entry.id);
+    if (!p) { p = this.loadNow(entry); this.loading.set(entry.id, p); }
+    return p;
+  }
+
+  entry(id: string) { return this.registry.find((e) => e.id === id) ?? null; }
+  map(id: string) { return this.loaded.get(id)?.data ?? null; }
+
+  private async loadNow(entry: MapRegistryEntry) {
     const data = await this.assets.json<MapData>(entry.file);
     const group = new THREE.Group();
     group.name = entry.id;
@@ -54,13 +73,17 @@ export class MapManager {
       this.atlasRects = rects;
     }
 
-    group.add(buildTerrain(data.terrain, this.physics));
+    // building footprints (for the painted city streets)
+    const footprints: Footprint[] = [];
+    for (const k of data.kit) if (k.k === 'building') footprints.push({ x: k.p[0], z: k.p[2], w: k.s[0], d: k.s[2], r: THREE.MathUtils.degToRad(k.r ?? 0) });
+    for (const p of data.prefabs) if (p.id === 'brick_building' && Math.abs(p.p[1] - (data.terrain.center?.[1] ?? 0)) < 0.5) footprints.push({ x: p.p[0], z: p.p[2], w: 1.05 * p.s, d: 1.0 * p.s, r: THREE.MathUtils.degToRad(p.r) });
+    group.add(buildTerrain(data.terrain, this.physics, footprints));
 
     const kit = new KitBuilder();
     for (const k of data.kit) kit.add(k);
     for (const m of kit.build()) group.add(m);
     for (const c of kit.colliders) {
-      if (c.type === 'box') this.physics.addBox(c.center, c.half, c.quat);
+      if (c.type === 'box') this.physics.addBox(c.center, c.half, c.quat, c.groups);
       else if (c.type === 'cylinder') this.physics.addCylinder(c.center, c.halfHeight, c.radius, c.quat);
       else this.physics.addCapsule(c.center, c.halfHeight, c.radius, c.quat);
     }
@@ -94,27 +117,75 @@ export class MapManager {
       else if (f.t === 'milestone' && this.atlasTex && this.atlasRects['gold_diamond_collectible']) this.fx.addMilestone(new THREE.Vector3(...f.p), f.h, this.atlasTex, this.atlasRects['gold_diamond_collectible']);
     }
 
+    for (const f of data.fx) if (f.t === 'portal') this.fx.addPortal(new THREE.Vector3(...f.p), f.s, f.r);
+
+    const movers = new MoverSystem(this.physics);
+    await movers.build(data.movers ?? [], this.assets);
+    group.add(movers.group);
+    const boosters = new BoosterSystem(this.physics);
+    await boosters.build(data.pads, data.rings, data.ladders, this.assets);
+    group.add(boosters.group);
+
     this.root.add(group);
-    this.loaded.set(entry.id, { entry, data, group, prefabs, sprites });
+    this.loaded.set(entry.id, { entry, data, group, prefabs, sprites, movers, boosters });
+    this.ladderList = [...this.loaded.values()].flatMap((m) => m.boosters.ladders);
+    this.physics.world.updateSceneQueries();
     return data;
   }
+
+  // ---- dynamic world features across all loaded maps (Player.hooks)
+  moverOf(c: RAPIER.Collider | null | undefined) {
+    if (!c) return null;
+    for (const m of this.loaded.values()) { const r = m.movers.moverOf(c); if (r) return r; }
+    return null;
+  }
+  padOf(c: RAPIER.Collider | null | undefined) {
+    if (!c) return null;
+    for (const m of this.loaded.values()) { const r = m.boosters.padOf(c); if (r) return r; }
+    return null;
+  }
+  ringCrossed(a: THREE.Vector3, b: THREE.Vector3) {
+    for (const m of this.loaded.values()) { const r = m.boosters.ringCrossed(a, b); if (r) return r; }
+    return null;
+  }
+  ladders() { return this.ladderList; }
+
+  stepMovers(t: number, dt: number) { for (const m of this.loaded.values()) m.movers.step(t, dt); }
+  resetMovers(t: number) { for (const m of this.loaded.values()) m.movers.reset(t); }
+  syncMovers(alpha: number) { for (const m of this.loaded.values()) m.movers.syncVisual(alpha); }
 
   get primary(): MapData | null {
     const first = this.loaded.values().next();
     return first.done ? null : first.value.data;
   }
 
-  zoneAt(y: number): { map: MapData; zone: ZoneData } | null {
+  /** The map the player is in: maps are stacked by height (registry yMin..yMax bands; the highest band wins). */
+  /** Which map's HUD applies at this height. `current` is kept within 2 m of its band (hysteresis), so standing
+   *  on the city's station (140 m, same level as the village summit) never flickers between the two maps. */
+  mapAt(x: number, y: number, z: number, current?: MapData | null): MapData | null {
+    void x; void z;
+    if (current) {
+      const c = this.loaded.get(current.id);
+      if (c && y >= c.entry.yMin - 2 && y < c.entry.yMax + 2) return current;
+    }
+    let best: MapData | null = null;
+    for (const m of this.loaded.values()) if (y >= m.entry.yMin && y < m.entry.yMax) best = m.data;
+    return best;
+  }
+
+  zoneAt(y: number, map?: MapData | null): { map: MapData; zone: ZoneData } | null {
     for (const m of this.loaded.values()) {
+      if (map && m.data !== map) continue;
       for (const z of m.data.zones) if (y >= z.y0 && y < z.y1) return { map: m.data, zone: z };
     }
     return null;
   }
 
-  update(time: number, camPos: THREE.Vector3, tint: THREE.Color) {
+  update(time: number, camPos: THREE.Vector3, tint: THREE.Color, dt = 1 / 60) {
     for (const m of this.loaded.values()) {
       m.prefabs.update(camPos);
       m.sprites?.update(time, tint);
+      m.boosters.update(dt, time);
     }
   }
 

@@ -4,7 +4,7 @@ import type { Quality } from '../config';
 import { fullscreenSupported, isFullscreen, isIOS, isStandalone } from './Fullscreen';
 
 export type UIHandlers = {
-  onStart: () => void;
+  onStart: (mapId?: string) => void;
   onResume: () => void;
   onRestart: () => void;
   onMainMenu: () => void;
@@ -13,6 +13,7 @@ export type UIHandlers = {
   onQuality: (q: Quality) => void;
   onSensitivity: (v: number) => void;
   onShowFps: (v: boolean) => void;
+  onAutoCam: (v: boolean) => void;
   onPause: () => void;
   onClick: () => void;
   onFullscreen: () => void;
@@ -52,6 +53,7 @@ export class UI {
   private altMe!: HTMLElement;
   private altMax!: HTMLElement;
   private altPb!: HTMLElement;
+  private mapY0 = 0;
   private mapHeight = 140;
   private settingsReturn: 'menu' | 'pause' = 'menu';
   private rotate!: HTMLDivElement;
@@ -126,6 +128,10 @@ export class UI {
     this.loadBar.style.width = `${Math.round(p * 100)}%`;
     if (tip) this.loadTip.textContent = tip;
   }
+  showLoading(tip: string) {
+    this.loading.classList.remove('hidden', 'fade');
+    this.setLoading(0.5, tip);
+  }
   hideLoading() {
     this.loading.classList.add('fade');
     setTimeout(() => this.loading.classList.add('hidden'), 700);
@@ -147,7 +153,7 @@ export class UI {
     this.menu.innerHTML = `
       <div style="display:flex;flex-direction:column;align-items:center">
         <div class="logo"><span class="l1">Skyward</span><span class="l2">Parkour</span></div>
-        <div class="sub">Map 001 – Starter Village · 140 m</div>
+        <div class="sub">Starter Village → Rooftop City · 320 m</div>
       </div>
       <div class="center">
         <div class="chars">
@@ -155,12 +161,13 @@ export class UI {
           <button class="char ${this.character === 'female' ? 'sel' : ''}" data-c="female">${img('female')}<div class="nm">Nhân vật nữ</div><div class="ds">Mia</div></button>
         </div>
         <button class="btn" data-a="start">BẮT ĐẦU LEO</button>
+        ${save.highestMap ? '<button class="btn secondary city" data-a="city">Chơi tiếp từ Rooftop City · 140 m</button>' : ''}
         ${this.touch && isIOS() && !isStandalone() ? '<div class="ios-tip">iPhone: bấm <b>Chia sẻ</b> → <b>Thêm vào MH chính</b> để chơi toàn màn hình</div>' : ''}
         <div class="row"><button class="btn secondary" data-a="settings">Cài đặt</button></div>
         <div class="stats">
           <div class="stat"><b>${best.toFixed(0)} m</b><span>Kỷ lục cá nhân</span></div>
-          <div class="stat"><b>${save.highestMap ? 'Map 001 ✓' : '—'}</b><span>Map cao nhất đã chinh phục</span></div>
-          <div class="stat"><b>${save.bestTime ? fmtTime(save.bestTime) : '—'}</b><span>Thời gian tốt nhất</span></div>
+          <div class="stat"><b>${save.highestMap === 'map002' ? 'Map 002 ✓' : save.highestMap ? 'Map 001 ✓' : '—'}</b><span>Map cao nhất đã chinh phục</span></div>
+          <div class="stat"><b>${save.bestTimes?.map002 ? fmtTime(save.bestTimes.map002) : save.bestTime ? fmtTime(save.bestTime) : '—'}</b><span>${save.bestTimes?.map002 ? 'Tốt nhất tới 320 m' : 'Tốt nhất tới 140 m'}</span></div>
         </div>
       </div>
       <div class="controls-help">${ctrls}<br>Rơi không chết – rơi xuống đâu, chơi tiếp ở đó. Không có checkpoint.</div>`;
@@ -172,26 +179,32 @@ export class UI {
         this.h.onCharacter(this.character);
       }),
     );
-    (this.menu.querySelector('[data-a=start]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.h.onStart(); });
+    (this.menu.querySelector('[data-a=start]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.h.onStart('map001'); });
+    this.menu.querySelector<HTMLButtonElement>('[data-a=city]')?.addEventListener('click', () => { this.h.onClick(); this.h.onStart('map002'); });
     (this.menu.querySelector('[data-a=settings]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.openSettings('menu'); });
     this.menu.classList.remove('hidden');
   }
   hideMenu() { this.menu.classList.add('hidden'); }
 
   // ---------------- HUD
-  setupHUD(zones: ZoneData[], mapHeight: number, personalBest: number) {
-    this.mapHeight = mapHeight;
+  /** Altitude bar for the map the player is in: world heights y0..y1 with its zone bands. */
+  setupHUD(zones: ZoneData[], y0: number, y1: number, personalBest: number) {
+    this.mapY0 = y0;
+    this.mapHeight = y1 - y0;
+    const H = this.mapHeight;
     const bar = this.hud.querySelector('.altbar') as HTMLDivElement;
     bar.innerHTML = '';
     for (const z of zones) {
+      const lo = Math.max(z.y0, y0) - y0, hi = Math.min(z.y1, y1) - y0;
+      if (hi <= lo) continue;
       const b = el('div', 'band');
-      b.style.bottom = `${(z.y0 / mapHeight) * 100}%`;
-      b.style.height = `${((Math.min(z.y1, mapHeight) - z.y0) / mapHeight) * 100}%`;
+      b.style.bottom = `${(lo / H) * 100}%`;
+      b.style.height = `${((hi - lo) / H) * 100}%`;
       b.style.background = z.color;
       b.title = z.name;
       bar.appendChild(b);
       const t = el('div', 'tick', z.id);
-      t.style.bottom = `${(((z.y0 + Math.min(z.y1, mapHeight)) / 2) / mapHeight) * 100}%`;
+      t.style.bottom = `${((lo + hi) / 2 / H) * 100}%`;
       bar.appendChild(t);
     }
     this.altMax = el('div', 'max');
@@ -201,7 +214,10 @@ export class UI {
     this.updatePB(personalBest);
   }
   updatePB(pb: number) {
-    if (this.altPb) this.altPb.style.bottom = `${Math.min(100, (pb / this.mapHeight) * 100)}%`;
+    if (this.altPb) {
+      this.altPb.style.bottom = `${Math.max(0, Math.min(100, ((pb - this.mapY0) / this.mapHeight) * 100))}%`;
+      this.altPb.style.display = pb < this.mapY0 - 0.5 ? 'none' : '';
+    }
   }
   showHUD(v: boolean) { this.hud.classList.toggle('hidden', !v); }
 
@@ -209,7 +225,7 @@ export class UI {
     this.hudCur.innerHTML = `${s.current.toFixed(0)}<small>m</small>`;
     this.hudLines.innerHTML = `Kỷ lục lượt: <b>${s.runMax.toFixed(0)} m</b><br>Kỷ lục cá nhân: <b>${s.best.toFixed(0)} m</b><br>Thời gian: ${fmtTime(s.time)}`;
     if (s.zone) this.hudZone.innerHTML = `<i style="background:${s.zone.color}"></i>Khu ${s.zone.id} – ${s.zone.name}`;
-    const pct = (v: number) => `${Math.max(0, Math.min(100, (v / this.mapHeight) * 100))}%`;
+    const pct = (v: number) => `${Math.max(0, Math.min(100, ((v - this.mapY0) / this.mapHeight) * 100))}%`;
     this.altMe.style.bottom = pct(s.current);
     this.altMax.style.bottom = pct(s.runMax);
     this.updatePB(s.best);
@@ -273,11 +289,13 @@ export class UI {
       <div class="set-row"><span>Đồ họa</span><div class="seg" data-k="q">
         <button data-v="low" class="${q === 'low' ? 'on' : ''}">Thấp</button><button data-v="medium" class="${q === 'medium' ? 'on' : ''}">Vừa</button><button data-v="high" class="${q === 'high' ? 'on' : ''}">Cao</button></div></div>
       <div class="set-row"><span>Độ nhạy camera</span><input type="range" min="0.4" max="2" step="0.1" value="${s.sensitivity}" data-k="sens"></div>
+      <div class="set-row"><span>Camera tự căn khi chạy thẳng</span><input type="checkbox" ${(s.autoCam ?? this.touch) ? 'checked' : ''} data-k="autocam"></div>
       <div class="set-row"><span>Hiện FPS</span><input type="checkbox" ${s.showFps ? 'checked' : ''} data-k="fps"></div>
       <div class="stack" style="margin-top:14px"><button class="btn" data-a="back">Xong</button></div></div>`;
     (this.settings.querySelector('[data-k=vol]') as HTMLInputElement).addEventListener('input', (e) => this.h.onVolume(parseFloat((e.target as HTMLInputElement).value)));
     (this.settings.querySelector('[data-k=sens]') as HTMLInputElement).addEventListener('input', (e) => this.h.onSensitivity(parseFloat((e.target as HTMLInputElement).value)));
     (this.settings.querySelector('[data-k=fps]') as HTMLInputElement).addEventListener('change', (e) => this.h.onShowFps((e.target as HTMLInputElement).checked));
+    (this.settings.querySelector('[data-k=autocam]') as HTMLInputElement).addEventListener('change', (e) => this.h.onAutoCam((e.target as HTMLInputElement).checked));
     this.settings.querySelectorAll<HTMLButtonElement>('[data-k=q] button').forEach((b) =>
       b.addEventListener('click', () => {
         this.h.onClick();
@@ -295,13 +313,13 @@ export class UI {
   }
 
   // ---------------- finish
-  showFinish(stats: { time: number; best: number; bestTime: number | null; firstTime: boolean }, onContinue: () => void, onAgain: () => void) {
-    this.finish.innerHTML = `<div class="panel finish"><h2>Chinh phục Map 001!</h2>
+  showFinish(stats: { title: string; time: number; best: number; bestTime: number | null; firstTime: boolean; next: string; hint: string }, onContinue: () => void, onAgain: () => void) {
+    this.finish.innerHTML = `<div class="panel finish"><h2>${stats.title}</h2>
       <div class="big">${fmtTime(stats.time)}</div>
       <div class="note" style="margin-top:0">Thời gian leo lượt này${stats.bestTime ? ` · Tốt nhất: ${fmtTime(stats.bestTime)}` : ''}</div>
-      <div class="next">Cổng sang <b>Map 002 – Rooftop City</b><br><span style="font-weight:400;font-size:13px">Sẽ mở trong bản cập nhật tiếp theo. Hãy luyện đường tắt để leo nhanh hơn!</span></div>
+      <div class="next">${stats.next}</div>
       <div class="stack"><button class="btn" data-a="cont">Tiếp tục khám phá</button><button class="btn secondary" data-a="again">Leo lại từ đầu</button></div>
-      ${stats.firstTime ? '<div class="note">Gợi ý: Map 001 có 3 đường tắt khó – bạn đã tìm thấy đường nào chưa?</div>' : ''}</div>`;
+      ${stats.firstTime ? `<div class="note">${stats.hint}</div>` : ''}</div>`;
     (this.finish.querySelector('[data-a=cont]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.finish.classList.add('hidden'); onContinue(); });
     (this.finish.querySelector('[data-a=again]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.finish.classList.add('hidden'); onAgain(); });
     this.finish.classList.remove('hidden');

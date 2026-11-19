@@ -18,7 +18,7 @@ const fs = require('fs');
   fs.mkdirSync(OUT, { recursive: true });
   if (mode === 'props') {
     for (const f of process.argv.slice(3)) {
-      const r = await page.evaluate(([u]) => renderViews(u, [[0,10],[90,10],[180,10],[0,80]]), ['/public/assets/map001/' + f + '.glb']);
+      const r = await page.evaluate(([u]) => renderViews(u, [[0,10],[90,10],[180,10],[0,80]]), ['/public/assets/' + (process.env.DIR || 'map001') + '/' + f + '.glb']);
       console.log(f, JSON.stringify(r.box));
       await sheet(r.imgs, `${OUT}/prop_${f}.png`, 4);
     }

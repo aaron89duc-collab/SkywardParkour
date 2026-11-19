@@ -19,7 +19,9 @@ export function reach(dh) {
 // ---------------------------------------------------------------- prefab height grids from collision meshes
 const G = 48;
 function loadPrefabGrid(id) {
-  const buf = fs.readFileSync(path.join(ROOT, 'public/assets/map001', `${id}.col.bin`));
+  const dirs = ['map001', 'map002'];
+  const dir = dirs.find((d) => fs.existsSync(path.join(ROOT, 'public/assets', d, `${id}.col.bin`)));
+  const buf = fs.readFileSync(path.join(ROOT, 'public/assets', dir, `${id}.col.bin`));
   const nv = buf.readUInt32LE(0), ni = buf.readUInt32LE(4);
   const pos = new Float32Array(buf.buffer.slice(buf.byteOffset + 8, buf.byteOffset + 8 + nv * 12));
   const idx = new Uint32Array(buf.buffer.slice(buf.byteOffset + 8 + nv * 12, buf.byteOffset + 8 + nv * 12 + ni * 4));
@@ -108,9 +110,11 @@ export class MapBuilder {
   kitPiece(k, p, s, r = 0, extra = {}) {
     const d = { k, p: p.map(r2), s: s.map(r2) };
     if (r) d.r = r2(r);
-    Object.assign(d, extra);
-    this.kit.push(d);
-    if (extra.nc || k === 'rope') return d;
+    const { name: _nm, vo: _vo, ...rest } = extra;
+    Object.assign(d, rest);
+    if (d.q) d.q = d.q.map(r2);
+    if (!extra.vo) this.kit.push(d);
+    if (extra.nc || k === 'rope' || k === 'rock') return d;
     // geometric record: oriented boxes (centre, half extents, yaw) + standable top
     const boxes = [];
     const [px, py, pz] = p;
@@ -122,6 +126,42 @@ export class MapBuilder {
     else if (k === 'post') boxes.push({ c: [px, py - s[1] / 2, pz], h: [s[0] * 0.8, s[1] / 2, s[0] * 0.8], top: s[0] > 0.25 });
     else if (k === 'log') boxes.push({ c: [px, py - s[0], pz], h: [s[1] / 2, s[0], s[0] * 0.55], top: true, narrow: true });
     else if (k === 'fence') boxes.push({ c: [px, py - s[1] / 2, pz], h: [s[0] / 2, s[1] / 2, 0.1], top: false });
+    else if (k === 'building') {
+      boxes.push({ c: [px, py - s[1] / 2, pz], h: [s[0] / 2, s[1] / 2, s[2] / 2], top: true, roof: true });
+      const par = extra.par ?? 0.8;
+      if (par > 0.01) {
+        const t = 0.35, c = Math.cos(deg(r)), sn = Math.sin(deg(r));
+        for (const [w, d, lx, lz] of [[s[0], t, 0, s[2] / 2 - t / 2], [s[0], t, 0, -s[2] / 2 + t / 2], [t, s[2] - 2 * t, s[0] / 2 - t / 2, 0], [t, s[2] - 2 * t, -s[0] / 2 + t / 2, 0]])
+          boxes.push({ c: [px + lx * c + lz * sn, py + par / 2, pz - lx * sn + lz * c], h: [w / 2, par / 2, d / 2], top: true, narrow: true, parapet: true });
+      }
+    }
+    else if (k === 'slab') boxes.push({ c: [px, py - s[1] / 2, pz], h: [s[0] / 2, s[1] / 2, s[2] / 2], top: true, narrow: s[2] < 0.9 || s[0] < 0.9 });
+    else if (k === 'girder') boxes.push({ c: [px, py - s[1] / 2, pz], h: [s[0] / 2, s[1] / 2, s[2] / 2], top: true, narrow: s[0] < 0.9 });
+    else if (k === 'billboard') {
+      const c = Math.cos(deg(r)), sn = Math.sin(deg(r));
+      boxes.push({ c: [px, py - s[1] / 2, pz], h: [(s[0] + 0.3) / 2, (s[1] + 0.3) / 2, 0.175], top: true, narrow: true });
+      const oz = 0.175 + 0.55;
+      boxes.push({ c: [px + oz * sn, py - s[1] - 0.22, pz + oz * c], h: [(s[0] + 0.3) / 2, 0.07, 0.55], top: true });
+    }
+    else if (k === 'rail') boxes.push({ c: [px, py - s[1] / 2, pz], h: [s[0] / 2, s[1] / 2, 0.07], top: false });
+    else if (k === 'awning') boxes.push({ c: [px, py - s[2] / 2, pz], h: [s[0] / 2, s[2] / 2 + 0.05, s[1] / 2], top: false });
+    else if (k === 'sign') boxes.push({ c: [px, py - s[1] / 2, pz], h: [(s[0] + 0.2) / 2, (s[1] + 0.2) / 2, 0.09], top: false });
+    else if (k === 'lamp') boxes.push({ c: [px, py - s[0] / 2, pz], h: [0.09, s[0] / 2, 0.09], top: false });
+    else if (k === 'antenna') boxes.push({ c: [px, py - s[0] / 2, pz], h: [s[1] * 0.33, s[0] / 2, s[1] * 0.33], top: false });
+    else if (k === 'wall') return d;
+    else if (k === 'solid') boxes.push({ c: [px, py - s[1] / 2, pz], h: [s[0] / 2, s[1] / 2, s[2] / 2], top: true });
+    else if (k === 'pipe') {
+      const q = extra.q; const rad = s[0];
+      const dx = q[0] - px, dz = q[2] - pz, len = Math.hypot(dx, dz);
+      if (Math.abs(q[1] - py) < 0.3 && len > 0.1) {
+        const yaw = (Math.atan2(dx, dz) * 180) / Math.PI;
+        this.objects.push({ type: 'kit', k, boxes: [{ c: [(px + q[0]) / 2, (py + q[1]) / 2, (pz + q[2]) / 2], h: [rad * 0.7, rad, len / 2 + rad], top: rad >= 0.3, narrow: true }], r: yaw, name: 'pipe' });
+      } else {
+        // vertical-ish pipe: solid column, not standable
+        this.objects.push({ type: 'kit', k, boxes: [{ c: [(px + q[0]) / 2, (py + q[1]) / 2, (pz + q[2]) / 2], h: [rad, Math.abs(q[1] - py) / 2 + rad, rad], top: false }], r: 0, name: 'pipe' });
+      }
+      return d;
+    }
     else if (k === 'stairs') {
       const [w, h, dd, n] = s;
       for (let i = 0; i < n; i++) {
@@ -131,7 +171,7 @@ export class MapBuilder {
         boxes.push({ c: [px + lz * sn, py - h + sh / 2, pz + lz * c], h: [w / 2, sh / 2, dd / n / 2], top: true });
       }
     }
-    this.objects.push({ type: 'kit', k, boxes, r, name: k });
+    this.objects.push({ type: 'kit', k, boxes, r, name: extra.name ?? k });
     return d;
   }
 
@@ -142,9 +182,12 @@ export class MapBuilder {
     this.sprites.push(d);
   }
 
-  /** highest walkable surface below `maxY` at (x,z) (ground = 0 inside the plateau) */
+  get ground() { return this.meta.ground ?? { x: 0, y: 0, z: 0, r: this.meta.radius }; }
+
+  /** highest walkable surface below `maxY` at (x,z) (ground = plateau top inside the plateau) */
   surfaceBelow(x, z, maxY, ignore = null) {
-    let best = Math.hypot(x, z) < this.meta.radius ? 0 : -999;
+    const G0 = this.ground;
+    let best = Math.hypot(x - G0.x, z - G0.z) < G0.r && G0.y < maxY ? G0.y : -999;
     for (const o of this.objects) {
       if (o === ignore) continue;
       if (o.type === 'prefab') {
@@ -161,9 +204,13 @@ export class MapBuilder {
     return best;
   }
 
+  /** explicit traversal the jump model cannot see (ladder, moving platform, pad launch, ring) */
+  link(a, b, kind) { (this.links ??= []).push({ a: a.slice(), b: b.slice(), kind }); }
+  node(p, o = null) { (this.extraNodes ??= []).push({ x: p[0], y: p[1], z: p[2], o }); }
+
   // ---------------- route helpers
   route(name) { if (!this.routes[name]) this.routes[name] = []; return this.routes[name]; }
-  mark(routeName, p, label = '') { this.route(routeName).push({ p: p.slice(), label }); }
+  mark(routeName, p, label = '', act = null) { const e = { p: p.slice(), label }; if (act) e.act = act; this.route(routeName).push(e); }
 
   /** place a scaffold plank with posts down to whatever is below */
   scaffold(x, y, z, w, d, r = 0, opts = {}) {
@@ -264,6 +311,27 @@ export class MapBuilder {
         this.kitPiece('pillar', [x, y, z], [size, Math.max(1.2, h)], yaw);
         break;
       }
+      case 'ac': {
+        // rooftop air-conditioning unit standing on the surface below (top at y)
+        const below = this.surfaceBelow(x, z, y - 0.1);
+        const sc = y - below;
+        if (sc >= 1.0 && sc <= 3.2) { this.prefab('vent_unit', x, below, z, Math.round(yaw / 90) * 90, sc / 0.99, { name: 'ac' }); break; }
+        this.kitPiece('slab', [x, y, z], [size, 0.35, size], yaw, { m: 'metal' });
+        break;
+      }
+      case 'boxes': {
+        // wooden crates stacked down to the surface below
+        const below = this.surfaceBelow(x, z, y - 0.1);
+        let top = y, k = 0;
+        while (top - below > 0.25 && k < 8) {
+          const s = Math.min(size, top - below);
+          this.prefab('wooden_crate', x + (k % 2 ? 0.06 : 0), top - s, z, Math.round(yaw + (k % 2 ? 10 : -6)), s, { name: 'crate' });
+          top -= s; k++;
+        }
+        break;
+      }
+      case 'girders': this.kitPiece('girder', [x, y, z], [opts.girderW ?? 0.9, 0.55, size], yaw); break;
+      case 'metal': this.kitPiece('slab', [x, y, z], [size, 0.3, size], yaw, { m: opts.slabM ?? 'grate' }); break;
       case 'rocks': {
         const H = size / 0.95 * 0.9;
         this.prefab('floating_island', x, y - 0.95 * H, z, Math.round(this.rnd() * 360), H, { name: 'rock' });
@@ -337,8 +405,11 @@ export class MapBuilder {
       }
     }
     // plateau ground
-    const R = this.meta.radius - 3;
-    for (let x = -R; x <= R; x += 3) for (let z = -R; z <= R; z += 3) if (Math.hypot(x, z) < R) nodes.push({ x, y: 0, z, o: null, ground: true });
+    const G0 = this.ground;
+    const R = G0.r - 3;
+    for (let x = -R; x <= R; x += 3) for (let z = -R; z <= R; z += 3) if (Math.hypot(x, z) < R) nodes.push({ x: G0.x + x, y: G0.y, z: G0.z + z, o: null, ground: true });
+    // explicit nodes (ladder tops/bottoms, pads, mover stops)
+    for (const n of this.extraNodes ?? []) nodes.push({ ...n, o: n.o ?? null });
     return nodes;
   }
 
@@ -405,9 +476,18 @@ export class MapBuilder {
       return -1;
     };
     const maxRad = 7.5;
+    // explicit links (ladders, movers, pads, rings): from the node nearest `a` to the node nearest `b`
+    const linkMap = new Map();
+    const nearestTo = (p) => { let best = -1, bd = 1e9; for (const n of nodes) { const d = Math.hypot(n.x - p[0], (n.y - p[1]) * 3, n.z - p[2]); if (d < bd) { bd = d; best = n.i; } } return bd < 2.5 ? best : -1; };
+    for (const L of this.links ?? []) {
+      const ia = nearestTo(L.a), ib = nearestTo(L.b);
+      if (ia < 0 || ib < 0) { console.log(`  link ${L.kind} unresolved: ${ia < 0 ? 'a ' + L.a.map(r2) : ''} ${ib < 0 ? 'b ' + L.b.map(r2) : ''}`); continue; }
+      if (!linkMap.has(ia)) linkMap.set(ia, []);
+      linkMap.get(ia).push([ib, 1]);
+    }
     const adj = (i, maxClass) => {
       const a = nodes[i];
-      const out = [];
+      const out = [...(linkMap.get(i) ?? [])];
       for (const j of neigh(a, maxRad)) {
         const b = nodes[j];
         const dh = b.y - a.y;

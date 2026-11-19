@@ -33,7 +33,7 @@ const { chromium } = require('playwright');
         if (st !== last) { log.push(`${t.toFixed(2)} ${st} feet=${P.renderPos.toArray().map(v => v.toFixed(2)).join(',')} vy=${P.vel.y.toFixed(1)}`); last = st; }
         for (const e of P.drainEvents()) if (e.type !== 'step') log.push(`   ev ${e.type}${e.speed !== undefined ? ' ' + e.speed.toFixed(1) : ''}${e.drop !== undefined ? ' drop ' + e.drop.toFixed(1) : ''}`);
         if (S.shotAt && Math.abs(t - S.shotAt) < dt / 2) {
-          const f = P.renderPos; g.cam.snapTo(f, S.shotCam ?? (P.yaw + Math.PI + 0.9)); g.cam.pitch = 0.15; g.cam.distance = 4.5; g.cam.update(0.016, f, P.yaw, false, false);
+          const f = P.renderPos; g.cam.snapTo(f, S.shotCam ?? (P.yaw + Math.PI + 0.9)); g.cam.pitch = 0.15; g.cam.distance = 4.5; g.cam.update(0.016, f, P.yaw, 'run', { airBaseY: 0, alignOK: false });
           g.env.update(0.016, 1, g.cam.camera, f); g.renderer.render(g.scene, g.cam.camera);
           window.__shot = g.renderer.domElement.toDataURL('image/jpeg', 0.8);
         }
@@ -48,7 +48,7 @@ const { chromium } = require('playwright');
   if (process.argv[2] !== 'islands') {
   // podium at (-9,140,-37), 6.4 wide: west face x=-12.2
   await run('catch', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 1.2, shotAt: 1.1 }`);
-  await run('fastfall_nocatch', `{ p: [-12.75, 147, -38], yaw: -Math.PI/2, t: 2.5 }`);
+  await run('fastfall_nocatch', `{ p: [-12.75, 147, -35.5], yaw: -Math.PI/2, t: 2.5 }`);
   await run('shimmy', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 3.2, camYaw: Math.PI/2, input: (t, I) => { I.touchMoveX = t > 0.8 ? 1 : 0; }, shotAt: 1.6 }`);
   await run('pushoff', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 2.0, camYaw: Math.PI/2, input: (t, I) => { if (t > 0.8) { I.touchMoveY = 1; } if (Math.abs(t - 0.9) < 0.01) { I.pressJump(); I.touchJumpHeld = true; } }, shotAt: 1.2 }`);
   await run('climb', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 2.2, input: (t, I) => { if (Math.abs(t - 0.8) < 0.01) I.pressJump(); }, shotAt: 1.15 }`);

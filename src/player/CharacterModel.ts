@@ -3,7 +3,7 @@ import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 
 export type AnimName =
   | 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'fallLong' | 'land' | 'roll'
-  | 'hang' | 'climb' | 'mantle' | 'shimmyL' | 'shimmyR' | 'push' | 'vault';
+  | 'hang' | 'climb' | 'mantle' | 'shimmyL' | 'shimmyR' | 'push' | 'vault' | 'ladder';
 
 type ClipSpec = {
   src: string;
@@ -34,6 +34,7 @@ const SPECS: Record<AnimName, ClipSpec> = {
   shimmyR: { src: 'Hang_and_Climb_Rght', t0: 0.0, t1: 2.0, strip: 'xz', loop: 'once', progress: 'x' },
   push: { src: 'Hang_and_Push_with_Foot', t0: 0.22, t1: 0.75, strip: 'xz', loop: 'once' },
   vault: { src: 'Parkour_Vault_1', t0: 0.05, t1: 1.0, strip: 'xyz', loop: 'once', progress: 'z' },
+  ladder: { src: 'Fast_Ladder_Climb', strip: 'xyz', loop: 'repeat' },
 };
 
 /** Resample [t0,t1] of a clip at fixed fps (robust even for sparse/optimised keyframes). */
@@ -92,6 +93,9 @@ export class CharacterModel {
   height = 1.6;
   durations = {} as Record<AnimName, number>;
   private curves = new Map<AnimName, number[]>();
+  /** metres climbed per second by the ladder clip at timeScale 1 */
+  ladderRate = 1.2;
+  private ladderRiseLocal = 0;
   private bones: Record<string, THREE.Bone> = {};
 
   constructor(gltf: GLTF, public id: string) {
@@ -129,6 +133,7 @@ export class CharacterModel {
         for (const v of vals) if (Math.abs(v - a) > Math.abs(b - a)) b = v;
         this.curves.set(name, vals.map((v) => (Math.abs(b - a) < 1e-6 ? 0 : THREE.MathUtils.clamp((v - a) / (b - a), 0, 1))));
       }
+      if (ht && name === 'ladder') this.ladderRiseLocal = ht.values[ht.values.length - 2] - ht.values[1];
       if (ht && spec.strip !== 'none') {
         const v = ht.values;
         const y0 = v[1];
@@ -176,6 +181,11 @@ export class CharacterModel {
     if (head) this.height = head.getWorldPosition(tmpA).y - this.root.position.y;
     sample('hang', 0.0);
     if (lh && rh) this.handHangHeight = (lh.getWorldPosition(tmpA).y + rh.getWorldPosition(tmpB).y) / 2 - this.root.position.y;
+    const hips = this.bones['Hips'];
+    if (hips?.parent && this.ladderRiseLocal && this.durations.ladder) {
+      const k = new THREE.Vector3().setFromMatrixScale(hips.parent.matrixWorld).y;
+      this.ladderRate = Math.max(0.3, Math.abs(this.ladderRiseLocal * k) / this.durations.ladder);
+    }
     this.mixer.stopAllAction();
     for (const a of Object.values(this.actions)) { a.reset(); a.weight = 1; }
   }
