@@ -1,0 +1,58 @@
+<!DOCTYPE html><html><head><style>body{margin:0;background:#888}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const W=400,H=400;
+const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+renderer.setSize(W,H); document.body.appendChild(renderer.domElement);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const pm = new THREE.PMREMGenerator(renderer);
+const envTex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+window.loadGLB = (url)=>new Promise((res,rej)=>loader.load(url,res,undefined,rej));
+window.THREE = THREE;
+// render model from given views into a sheet; returns dataURL
+window.renderViews = async (url, views, opts={}) => {
+  const gltf = await loadGLB(url);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9fc8e8); scene.environment = envTex;
+  scene.add(new THREE.HemisphereLight(0xffffff,0x667744,1.2));
+  const dl = new THREE.DirectionalLight(0xffffff,2); dl.position.set(3,5,2); scene.add(dl);
+  const obj = gltf.scene; scene.add(obj);
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj, true);
+  const c = box.getCenter(new THREE.Vector3()); const s = box.getSize(new THREE.Vector3());
+  const r = s.length()*0.6;
+  const cam = new THREE.PerspectiveCamera(35,1,0.01,100);
+  const out=[];
+  for (const [az,el] of views) {
+    const a=az*Math.PI/180,e=el*Math.PI/180;
+    cam.position.set(c.x+Math.sin(a)*Math.cos(e)*r*2.2, c.y+Math.sin(e)*r*2.2, c.z+Math.cos(a)*Math.cos(e)*r*2.2);
+    cam.lookAt(c); renderer.render(scene,cam); out.push(renderer.domElement.toDataURL('image/png'));
+  }
+  return {imgs:out, box:[box.min.toArray(),box.max.toArray()]};
+};
+window.renderAnim = async (url, clipName, times, az=30) => {
+  const gltf = await loadGLB(url);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9fc8e8); scene.environment = envTex;
+  scene.add(new THREE.HemisphereLight(0xffffff,0x667744,1.2));
+  const grid = new THREE.GridHelper(4,8); scene.add(grid);
+  const obj = gltf.scene; scene.add(obj);
+  const mixer = new THREE.AnimationMixer(obj);
+  const clip = gltf.animations.find(a=>a.name===clipName);
+  const act = mixer.clipAction(clip); act.play();
+  const cam = new THREE.PerspectiveCamera(40,1,0.01,100);
+  const a=az*Math.PI/180; cam.position.set(Math.sin(a)*4.5,1.6,Math.cos(a)*4.5); cam.lookAt(0,0.9,0);
+  const out=[]; const hips=[];
+  let hipBone; obj.traverse(o=>{ if(o.isBone && /hip/i.test(o.name) && !hipBone) hipBone=o; });
+  for (const t of times) { mixer.setTime(t); obj.updateMatrixWorld(true);
+    const hp = new THREE.Vector3(); hipBone.getWorldPosition(hp); hips.push(hp.toArray().map(v=>+v.toFixed(2)));
+    renderer.render(scene,cam); out.push(renderer.domElement.toDataURL('image/png')); }
+  const bones=[]; obj.traverse(o=>{if(o.isBone) bones.push(o.name)});
+  return {imgs:out, hips, bones, dur:clip.duration};
+};
+window.ready = true;
+</script></body></html>

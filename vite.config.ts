@@ -1,9 +1,6 @@
 import { defineConfig } from 'vite';
-
 export default defineConfig({
-  base: '/',
-  build: {
-    target: 'es2022',
-    assetsInlineLimit: 4096,
-  },
+  base: './',
+  build: { target: 'es2020', chunkSizeWarningLimit: 4000, assetsInlineLimit: 0 },
+  server: { host: true },
 });
