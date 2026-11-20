@@ -72,16 +72,19 @@ export class PrefabSystem {
     this.group.name = 'prefabs';
   }
 
-  async build(items: (PrefabData & { scenery?: boolean })[]) {
+  /** extraFiles / extraEmissive: models a (downloaded) map brings itself, so new maps need no app update */
+  async build(items: (PrefabData & { scenery?: boolean })[], extraFiles: Record<string, string> = {}, extraEmissive: Record<string, number> = {}) {
+    const FILES = { ...PREFAB_FILES, ...extraFiles };
+    const EMIT = { ...EMISSIVE, ...extraEmissive };
     const byId = new Map<string, (PrefabData & { scenery?: boolean })[]>();
     for (const it of items) {
-      if (!PREFAB_FILES[it.id]) { console.warn('Unknown prefab', it.id); continue; }
+      if (!FILES[it.id]) { console.warn('Unknown prefab', it.id); continue; }
       let l = byId.get(it.id);
       if (!l) { l = []; byId.set(it.id, l); }
       l.push(it);
     }
     await Promise.all([...byId.entries()].map(async ([id, list]) => {
-      const base = PREFAB_FILES[id];
+      const base = FILES[id];
       const needCol = list.some((x) => x.col !== false && !x.scenery);
       const [gltf, col] = await Promise.all([this.assets.gltf(`${base}.glb`), needCol ? this.assets.collision(`${base}.col.bin`) : Promise.resolve(null)]);
       const meshes: THREE.Mesh[] = [];
@@ -97,7 +100,7 @@ export class PrefabSystem {
         mat.envMapIntensity = 0.55;
         mat.roughness = 0.92;
         mat.metalness = 0;
-        const em = EMISSIVE[id];
+        const em = EMIT[id];
         if (em && mat.map) {
           mat.emissive = new THREE.Color('#ffffff');
           mat.emissiveIntensity = em;

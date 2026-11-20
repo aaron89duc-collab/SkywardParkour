@@ -9,8 +9,33 @@ export type SaveData = {
   bestTime: number | null; // seconds to reach the Map 001 exit
   bestTimes?: Record<string, number>; // per map: seconds from the run start to that map's exit
   tips?: number; // how many times the hang tutorial was shown
+  /** player name + device identity for the online leaderboard (made on the device, no account needed) */
+  profile?: { name: string; id: string; token: string; tag?: string };
+  /** signature of the results last accepted by the leaderboard server (resubmit when they improve) */
+  lbSent?: string;
+  /** last mode picked in the menu */
+  mode?: GameMode;
+  /** Challenge mode: only records and achievements are kept (never a position or a run in progress) */
+  challenge?: ChallengeRecords;
   settings: { volume: number; quality: Quality | null; sensitivity: number; showFps: boolean; autoCam: boolean | null };
 };
+
+/** Adventure: as before (continue from conquered maps). Challenge: every run from 0 m, falls must be re-climbed. */
+export type GameMode = 'adventure' | 'challenge';
+
+export type ChallengeRecords = {
+  best: number;
+  /** per map: seconds from 0 m to that map's exit */
+  bestTimes: Record<string, number>;
+  runs: number;
+  /** achievement id -> unlock time */
+  achievements: Record<string, number>;
+};
+
+export function challengeOf(s: SaveData): ChallengeRecords {
+  if (!s.challenge) s.challenge = { best: 0, bestTimes: {}, runs: 0, achievements: {} };
+  return s.challenge;
+}
 
 const KEY = 'skyward-parkour.save.v1';
 
@@ -45,11 +70,19 @@ export class Score {
   runMax = 0;
   playTime = 0;
   newRecord = false;
+  /** admin test run (fly mode used): nothing is recorded */
+  test = false;
   private lastSave = 0;
+
+  /** mode of the current run: records go to Adventure (personalBest) or Challenge (save.challenge) */
+  mode: GameMode = 'adventure';
 
   constructor(public save: SaveData) {}
 
   get personalBest() { return this.save.personalBest; }
+  /** best height of the current mode */
+  get best() { return this.mode === 'challenge' ? challengeOf(this.save).best : this.save.personalBest; }
+  private setBest(v: number) { if (this.mode === 'challenge') challengeOf(this.save).best = v; else this.save.personalBest = v; }
 
   private runStartBest = 0;
 
@@ -58,18 +91,20 @@ export class Score {
     this.runMax = 0;
     this.playTime = 0;
     this.newRecord = false;
-    this.runStartBest = this.save.personalBest;
+    this.test = false;
+    this.runStartBest = this.best;
   }
 
   /** returns true the first time the previous personal best is beaten in this run */
   update(dt: number, height: number): boolean {
     this.playTime += dt;
-    this.save.totalPlayTime += dt;
     this.current = Math.max(0, height);
     if (this.current > this.runMax) this.runMax = this.current;
+    if (this.test) return false;
+    this.save.totalPlayTime += dt;
     let beat = false;
     if (!this.newRecord && this.runStartBest > 2 && this.runMax > this.runStartBest + 0.5) { this.newRecord = true; beat = true; }
-    if (this.runMax > this.save.personalBest) this.save.personalBest = this.runMax;
+    if (this.runMax > this.best) this.setBest(this.runMax);
     this.lastSave += dt;
     if (this.lastSave > 5) { this.lastSave = 0; writeSave(this.save); }
     return beat;

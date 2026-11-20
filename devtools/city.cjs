@@ -10,7 +10,7 @@ require('fs').mkdirSync(OUT, { recursive: true });
   await page.goto('http://127.0.0.1:5173/');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 240000 });
   const t0 = Date.now();
-  await page.evaluate(() => window.__game.loadOtherMaps());
+  await page.evaluate(async () => { const g = window.__game; g.renderer.setAnimationLoop(null); await g.loadOtherMaps(); });
   console.log('map002 loaded in', Date.now() - t0, 'ms');
   const views = JSON.parse(process.argv[2] || '[]');
   const info = await page.evaluate(() => {

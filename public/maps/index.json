@@ -1,4 +1,13 @@
 [
-  { "id": "map001", "name": "Starter Village", "file": "maps/map001.json", "yMin": -70, "yMax": 141.5 },
-  { "id": "map002", "name": "Rooftop City", "file": "maps/map002.json", "yMin": 141.5, "yMax": 400 }
+ {
+  "id": "map001",
+  "name": "Starter Village",
+  "file": "maps/map001.json",
+  "yMin": -70,
+  "yMax": 141.5,
+  "order": 1,
+  "bundled": true,
+  "version": 2,
+  "hash": "a66e325f995fb445656c1eb1997318d38f7e4640a8505251ea18321c43449fd6"
+ }
 ]

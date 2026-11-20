@@ -5,24 +5,28 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
-    "build": "tsc --noEmit && vite build",
+    "build": "node devtools/content.mjs build && tsc --noEmit && vite build",
     "preview": "vite preview --host",
     "map": "node devtools/build-map001.mjs",
     "assets:sprites": "node devtools/build-sprites.mjs \"../Asset map 1/Skyward_Parkour_Map001_Assets\" public/assets/sprites",
-    "test:bot": "node devtools/bot.cjs"
+    "test:bot": "node devtools/bot.cjs",
+    "content:build": "node devtools/content.mjs build",
+    "content:publish": "node devtools/content.mjs publish",
+    "content:cors": "node devtools/content.mjs cors"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.14.0",
     "three": "0.170.0"
   },
   "devDependencies": {
-    "@types/three": "0.170.0",
-    "sharp": "^0.33.5",
-    "typescript": "5.6.3",
-    "vite": "^6.0.0",
     "@gltf-transform/core": "^4.5.1",
     "@gltf-transform/extensions": "^4.5.1",
     "@gltf-transform/functions": "^4.5.1",
-    "meshoptimizer": "^1.3.0"
+    "@types/three": "0.170.0",
+    "meshoptimizer": "^1.3.0",
+    "sharp": "^0.33.5",
+    "typescript": "5.6.3",
+    "vite": "^6.0.0",
+    "wrangler": "^4.165.0"
   }
 }

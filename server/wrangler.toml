@@ -1,0 +1,19 @@
+# Skyward Parkour API: online leaderboard (Cloudflare Worker + D1).
+# Setup once (see README "Bảng xếp hạng online"):
+#   npx wrangler d1 create skyward          -> paste the database_id below
+#   npx wrangler d1 execute skyward --remote --file=schema.sql
+#   npx wrangler deploy                     -> https://skyward-api.<your-subdomain>.workers.dev
+name = "skyward-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skyward"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# heights above this are rejected (top of the highest published map + margin)
+MAX_HEIGHT = "400"
+# a map cannot honestly be finished faster than this (seconds)
+MIN_MAP_SECONDS = "30"

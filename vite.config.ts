@@ -1,6 +1,145 @@
-import { defineConfig } from 'vite';
-export default defineConfig({
-  base: './',
-  build: { target: 'es2020', chunkSizeWarningLimit: 4000, assetsInlineLimit: 0 },
-  server: { host: true },
+import { defineConfig, loadEnv, type Plugin } from 'vite';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+
+/**
+ * Downloadable map content (packs/*):
+ *  - dev server: served live at /content/ (manifest.json + files/<sha256>), straight from packs/, no build step
+ *  - build: when VITE_CONTENT_URL is not an absolute URL (no R2 configured yet), content-dist/ is copied into
+ *    dist/content/ so the site still offers the maps as downloads (self-hosted fallback). With R2 configured
+ *    the packs are NOT shipped with the app: players download them from R2 once and keep them offline.
+ */
+function contentPlugin(contentUrl: string | undefined): Plugin {
+  const cache = new Map();
+  let outDir = 'dist';
+  return {
+    name: 'skyward-content',
+    configResolved(c) { outDir = path.resolve(c.root, c.build.outDir); },
+    configureServer(server) {
+      server.middlewares.use('/content/', async (req, res, next) => {
+        try {
+          // @ts-expect-error plain .mjs dev tool
+          const { scanPacks, manifestOf } = await import('./devtools/content.mjs');
+          const url = (req.url ?? '').split('?')[0];
+          const packs = scanPacks(cache);
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Cache-Control', 'no-store');
+          if (url === '/manifest.json' || url === 'manifest.json') {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(manifestOf(packs)));
+            return;
+          }
+          const m = /^\/?files\/([0-9a-f]{64})$/.exec(url);
+          if (m) {
+            for (const p of packs) for (const f of Object.values(p.files) as { abs: string; hash: string }[]) {
+              if (f.hash === m[1]) { res.setHeader('Content-Type', 'application/octet-stream'); fs.createReadStream(f.abs).pipe(res); return; }
+            }
+          }
+          res.statusCode = 404;
+          res.end('not found');
+        } catch (e) { next(e); }
+      });
+    },
+    // writeBundle hooks all finish before any closeBundle runs, so the service worker never lists these files
+    async writeBundle() {
+      // @ts-expect-error plain .mjs dev tool
+      const { scanPacks } = await import('./devtools/content.mjs');
+      // An old copy of a downloadable map left in public/ (e.g. public/assets/map002) must not ship inside the app
+      // (nor be precached by the service worker): drop it from dist. Nothing has to be deleted by hand.
+      for (const p of scanPacks()) {
+        if (p.meta.bundled) continue;
+        for (const r of Object.keys(p.files)) {
+          const parts = r.split('/');
+          if (parts.length > 2 && parts[1] === p.id) fs.rmSync(path.join(outDir, parts[0], parts[1]), { recursive: true, force: true });
+          else fs.rmSync(path.join(outDir, r), { force: true });
+        }
+      }
+    },
+    async closeBundle() {
+      if (contentUrl && /^https?:\/\//.test(contentUrl)) return;
+      // @ts-expect-error plain .mjs dev tool
+      const { build } = await import('./devtools/content.mjs');
+      build();
+      fs.cpSync(path.resolve('content-dist'), path.join(outDir, 'content'), { recursive: true, filter: (s: string) => !path.basename(s).startsWith('.') });
+    },
+  };
+}
+
+/**
+ * Offline app shell for the web / installed PWA / TWA (not used inside Capacitor, where files are local anyway).
+ * After the first online visit everything the app itself needs (code, Map 001, characters, sprites) is cached,
+ * so the game opens in airplane mode. Downloaded maps live in IndexedDB (content manager), not here.
+ */
+function serviceWorkerPlugin(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'skyward-sw',
+    apply: 'build',
+    configResolved(c) { outDir = path.resolve(c.root, c.build.outDir); },
+    closeBundle: {
+      order: 'post',
+      handler() {
+        const files: string[] = [];
+        const walk = (d: string) => {
+          for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+            const f = path.join(d, e.name);
+            const rel = path.relative(outDir, f).split(path.sep).join('/');
+            if (e.isDirectory()) { if (rel !== 'content') walk(f); }
+            else if (rel !== 'sw.js' && !e.name.startsWith('.')) files.push(rel);
+          }
+        };
+        walk(outDir);
+        files.sort();
+        const version = createHash('sha256').update(files.map((f) => `${f}:${fs.statSync(path.join(outDir, f)).size}:${fs.statSync(path.join(outDir, f)).mtimeMs}`).join('|')).digest('hex').slice(0, 12);
+        const precache = ['./', ...files.map((f) => './' + f)];
+        fs.writeFileSync(path.join(outDir, 'sw.js'), SW_TEMPLATE.replace('__VERSION__', version).replace('__PRECACHE__', JSON.stringify(precache)));
+      },
+    },
+  };
+}
+
+const SW_TEMPLATE = `/* Skyward Parkour offline app shell (generated by the build) */
+const VERSION = '__VERSION__';
+const CACHE = 'skyward-app-' + VERSION;
+const FONTS = 'skyward-fonts';
+const PRECACHE = __PRECACHE__;
+self.addEventListener('install', (e) => {
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', (e) => {
+  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith('skyward-app-') && k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+});
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+    e.respondWith(caches.open(FONTS).then(async (c) => (await c.match(req)) || fetch(req).then((r) => { if (r.ok || r.type === 'opaque') c.put(req, r.clone()); return r; }).catch(() => Response.error())));
+    return;
+  }
+  if (url.origin !== self.location.origin) return;
+  // downloadable maps are fetched by the game and kept in IndexedDB; never cache them twice
+  if (url.pathname.includes('/content/')) return;
+  if (req.mode === 'navigate') {
+    // newest page when online, the cached one when not
+    e.respondWith(fetch(req).then((r) => { const cp = r.clone(); caches.open(CACHE).then((c) => c.put('./', cp)); return r; }).catch(() => caches.match('./', { cacheName: CACHE, ignoreVary: true })));
+    return;
+  }
+  e.respondWith(caches.match(req, { ignoreSearch: true, ignoreVary: true }).then((hit) => hit || fetch(req)));
+});
+`;
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), 'VITE_');
+  // Map 002 moved to packs/map002 (downloadable). An old copy left in public/ is harmless: the build drops it from dist.
+  if (fs.existsSync('public/assets/map002') || fs.existsSync('public/maps/map002.json')) {
+    console.info('[skyward] old copy of Map 002 in public/ is ignored (Map 002 lives in packs/map002); you may delete it.');
+  }
+  return {
+    base: './',
+    build: { target: 'es2020', chunkSizeWarningLimit: 4000, assetsInlineLimit: 0 },
+    server: { host: true },
+    plugins: [contentPlugin(env.VITE_CONTENT_URL), serviceWorkerPlugin()],
+  };
 });

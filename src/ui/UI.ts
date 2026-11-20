@@ -1,10 +1,27 @@
 import type { ZoneData } from '../world/MapTypes';
-import type { SaveData } from '../systems/Score';
+import type { SaveData, GameMode } from '../systems/Score';
 import type { Quality } from '../config';
 import { fullscreenSupported, isFullscreen, isIOS, isStandalone } from './Fullscreen';
+import type { OnlineUI } from './OnlineUI';
+
+/** Menu facts that depend on maps on the device / the player profile (provided by the game). */
+export type MenuInfo = {
+  name: string | null;
+  tag?: string;
+  /** maps the player may start from (unlocked and on the device), above the first one */
+  continueFrom: { id: string; name: string; y: number }[];
+  conquered: string | null;
+  bestTime: { label: string; value: number } | null;
+  /** new maps / updates waiting (dot on the Maps button) */
+  news: boolean;
+  mode: GameMode;
+  challengeBest: number;
+  achievements: { got: number; total: number };
+};
 
 export type UIHandlers = {
-  onStart: (mapId?: string) => void;
+  onStart: (mapId?: string, mode?: GameMode) => void;
+  onAchievements?: () => void;
   onResume: () => void;
   onRestart: () => void;
   onMainMenu: () => void;
@@ -17,12 +34,15 @@ export type UIHandlers = {
   onPause: () => void;
   onClick: () => void;
   onFullscreen: () => void;
+  menuInfo?: () => MenuInfo;
 };
 
 const fmtTime = (s: number) => {
   const m = Math.floor(s / 60), ss = Math.floor(s % 60);
   return `${m}:${ss.toString().padStart(2, '0')}`;
 };
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = '') => {
   const e = document.createElement(tag);
@@ -62,6 +82,15 @@ export class UI {
   private quality: Quality = 'high';
   private save: SaveData | null = null;
   bindSave(s: SaveData, q: Quality) { this.save = s; this.quality = q; }
+  /** name / maps / leaderboard panels (set by the game) */
+  online: OnlineUI | null = null;
+  private menuArgs: [SaveData, Record<string, string>, Quality] | null = null;
+
+  /** content or profile changed: refresh the menu (if shown) and the maps panel */
+  refreshMaps() {
+    this.online?.refresh();
+    if (this.menuArgs && !this.menu.classList.contains('hidden')) this.showMenu(...this.menuArgs);
+  }
 
   constructor(parent: HTMLElement, private h: UIHandlers, private touch: boolean) {
     this.root = parent;
@@ -78,7 +107,7 @@ export class UI {
 
     // hud
     this.hud = el('div', 'hud hidden', `
-      <div class="height"><div class="cur">0<small>m</small></div><div class="lines"></div></div>
+      <div class="height"><div class="cur">0<small>m</small></div><span class="test-badge hidden">TEST</span><span class="mode-badge hidden">THỬ THÁCH</span><div class="lines"></div></div>
       <div class="zone"></div>
       <button class="pause-btn" aria-label="Tạm dừng">II</button>
       <button class="fs-btn" aria-label="Toàn màn hình"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
@@ -143,6 +172,8 @@ export class UI {
 
   // ---------------- menu
   showMenu(save: SaveData, portraits: Record<string, string>, quality: Quality) {
+    this.menuArgs = [save, portraits, quality];
+    const info: MenuInfo = this.h.menuInfo?.() ?? { name: null, continueFrom: [], conquered: null, bestTime: null, news: false, mode: 'adventure', challengeBest: 0, achievements: { got: 0, total: 0 } };
     this.character = save.character;
     this.quality = quality;
     const best = save.personalBest;
@@ -153,21 +184,27 @@ export class UI {
     this.menu.innerHTML = `
       <div style="display:flex;flex-direction:column;align-items:center">
         <div class="logo"><span class="l1">Skyward</span><span class="l2">Parkour</span></div>
-        <div class="sub">Starter Village → Rooftop City · 320 m</div>
+        <div class="sub">Leo cao không giới hạn · rơi không chết</div>
+        ${info.name ? `<button class="player-chip" data-a="name">${esc(info.name)}${info.tag ? ` <i>#${esc(info.tag)}</i>` : ''} · <u>Đổi tên</u></button>` : ''}
       </div>
       <div class="center">
         <div class="chars">
           <button class="char ${this.character === 'male' ? 'sel' : ''}" data-c="male">${img('male')}<div class="nm">Nhân vật nam</div><div class="ds">Kai</div></button>
           <button class="char ${this.character === 'female' ? 'sel' : ''}" data-c="female">${img('female')}<div class="nm">Nhân vật nữ</div><div class="ds">Mia</div></button>
         </div>
-        <button class="btn" data-a="start">BẮT ĐẦU LEO</button>
-        ${save.highestMap ? '<button class="btn secondary city" data-a="city">Chơi tiếp từ Rooftop City · 140 m</button>' : ''}
+        <div class="modes">
+          <button class="btn mode ${info.mode === 'adventure' ? 'last' : ''}" data-mode="adventure"><b>PHIÊU LƯU</b><span>Chơi tự do · tiếp tục từ map đã chinh phục</span></button>
+          <button class="btn mode challenge ${info.mode === 'challenge' ? 'last' : ''}" data-mode="challenge"><b>THỬ THÁCH</b><span>Luôn từ 0 m · rơi bao nhiêu leo lại bấy nhiêu</span></button>
+        </div>
+        ${info.continueFrom.map((c) => `<button class="btn secondary city" data-cont="${c.id}">Phiêu lưu tiếp từ ${esc(c.name)} · ${Math.round(c.y)} m</button>`).join('')}
+        ${this.online?.newsHtml() ?? ''}
         ${this.touch && isIOS() && !isStandalone() ? '<div class="ios-tip">iPhone: bấm <b>Chia sẻ</b> → <b>Thêm vào MH chính</b> để chơi toàn màn hình</div>' : ''}
-        <div class="row"><button class="btn secondary" data-a="settings">Cài đặt</button></div>
+        <div class="row"><button class="btn secondary ${info.news ? 'dot' : ''}" data-a="maps">Bản đồ</button><button class="btn secondary" data-a="lb">Bảng xếp hạng</button><button class="btn secondary" data-a="ach">Thành tích ${info.achievements.got}/${info.achievements.total}</button><button class="btn secondary" data-a="settings">Cài đặt</button></div>
         <div class="stats">
-          <div class="stat"><b>${best.toFixed(0)} m</b><span>Kỷ lục cá nhân</span></div>
-          <div class="stat"><b>${save.highestMap === 'map002' ? 'Map 002 ✓' : save.highestMap ? 'Map 001 ✓' : '—'}</b><span>Map cao nhất đã chinh phục</span></div>
-          <div class="stat"><b>${save.bestTimes?.map002 ? fmtTime(save.bestTimes.map002) : save.bestTime ? fmtTime(save.bestTime) : '—'}</b><span>${save.bestTimes?.map002 ? 'Tốt nhất tới 320 m' : 'Tốt nhất tới 140 m'}</span></div>
+          <div class="stat"><b>${best.toFixed(0)} m</b><span>Kỷ lục Phiêu lưu</span></div>
+          <div class="stat"><b>${info.challengeBest.toFixed(0)} m</b><span>Kỷ lục Thử thách</span></div>
+          <div class="stat"><b>${info.conquered ? `${esc(info.conquered)} ✓` : '—'}</b><span>Map cao nhất đã chinh phục</span></div>
+          <div class="stat"><b>${info.bestTime ? fmtTime(info.bestTime.value) : '—'}</b><span>${info.bestTime ? esc(info.bestTime.label) : 'Thời gian tốt nhất'}</span></div>
         </div>
       </div>
       <div class="controls-help">${ctrls}<br>Rơi không chết – rơi xuống đâu, chơi tiếp ở đó. Không có checkpoint.</div>`;
@@ -179,8 +216,13 @@ export class UI {
         this.h.onCharacter(this.character);
       }),
     );
-    (this.menu.querySelector('[data-a=start]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.h.onStart('map001'); });
-    this.menu.querySelector<HTMLButtonElement>('[data-a=city]')?.addEventListener('click', () => { this.h.onClick(); this.h.onStart('map002'); });
+    this.menu.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => b.addEventListener('click', () => { this.h.onClick(); this.h.onStart(undefined, b.dataset.mode as GameMode); }));
+    this.menu.querySelectorAll<HTMLButtonElement>('[data-cont]').forEach((b) => b.addEventListener('click', () => { this.h.onClick(); this.h.onStart(b.dataset.cont, 'adventure'); }));
+    this.menu.querySelector('[data-a=ach]')?.addEventListener('click', () => { this.h.onClick(); this.h.onAchievements?.(); });
+    this.menu.querySelector('[data-a=maps]')?.addEventListener('click', () => { this.h.onClick(); this.online?.openMaps(); });
+    this.menu.querySelector('[data-a=lb]')?.addEventListener('click', () => { this.h.onClick(); this.online?.openLeaderboard(); });
+    this.menu.querySelector('[data-a=name]')?.addEventListener('click', () => { this.h.onClick(); if (this.online) { this.online.onNameSet = () => this.refreshMaps(); this.online.openName(); } });
+    this.online?.bindNews(this.menu, () => this.refreshMaps());
     (this.menu.querySelector('[data-a=settings]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.openSettings('menu'); });
     this.menu.classList.remove('hidden');
   }
@@ -220,6 +262,12 @@ export class UI {
     }
   }
   showHUD(v: boolean) { this.hud.classList.toggle('hidden', !v); }
+  /** the height counter (admin's hidden 5-tap entry point on phones) */
+  get hudHeightEl() { return this.hud.querySelector('.height') as HTMLElement; }
+  /** Challenge run: badge next to the height */
+  setModeBadge(on: boolean) { (this.hud.querySelector('.mode-badge') as HTMLElement).classList.toggle('hidden', !on); }
+  /** admin test run: nothing is being recorded */
+  setTestBadge(on: boolean) { (this.hud.querySelector('.test-badge') as HTMLElement).classList.toggle('hidden', !on); }
 
   updateHUD(s: { current: number; runMax: number; best: number; time: number; zone: ZoneData | null; fps?: number }) {
     this.hudCur.innerHTML = `${s.current.toFixed(0)}<small>m</small>`;

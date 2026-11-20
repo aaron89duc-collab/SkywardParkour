@@ -19,7 +19,13 @@ import { Effects } from '../fx/Effects';
 import { installHeightFog } from '../world/HeightFog';
 import { UI } from '../ui/UI';
 import { AudioEngine } from '../systems/Audio';
-import { Score, loadSave, writeSave, type SaveData } from '../systems/Score';
+import { Score, loadSave, writeSave, challengeOf, type SaveData, type GameMode } from '../systems/Score';
+import { Achievements, type AchDef } from '../systems/Achievements';
+import { Admin } from '../systems/Admin';
+import { ContentManager } from '../content/ContentManager';
+import { Leaderboard } from '../online/Leaderboard';
+import { OnlineUI } from '../ui/OnlineUI';
+import type { MenuInfo } from '../ui/UI';
 import { enterFullscreen, fullscreenSupported, isFullscreen, toggleFullscreen } from '../ui/Fullscreen';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'finished';
@@ -64,6 +70,17 @@ export class Game {
   private isTouch = isTouchDevice();
   private sensitivity = 1;
   private lastZone: ZoneData | null = null;
+  /** admin / map-test mode (hidden; see systems/Admin.ts) */
+  admin: Admin | null = null;
+  /** maps: inside the app + downloaded (offline-first, see content/ContentManager.ts) */
+  content = new ContentManager();
+  lb!: Leaderboard;
+  private lbTimer = 30;
+  /** Adventure (continue from conquered maps) or Challenge (always from 0 m, records + achievements only) */
+  mode: GameMode = 'adventure';
+  ach!: Achievements;
+  private achMax = 0;
+  private adminPrompt = false;
 
   constructor(private container: HTMLElement) {
     installHeightFog();
@@ -77,7 +94,7 @@ export class Game {
   async init() {
     const preset = QUALITY_PRESETS[this.quality];
     this.ui = new UI(this.container, {
-      onStart: (id) => void this.start(id ?? 'map001'),
+      onStart: (id, mode) => void this.start(id ?? undefined, mode),
       onResume: () => this.resume(),
       onRestart: () => this.restart(),
       onMainMenu: () => this.toMenu(),
@@ -90,6 +107,8 @@ export class Game {
       onPause: () => this.pause(),
       onClick: () => { this.audio.init(); this.audio.click(); },
       onFullscreen: () => toggleFullscreen(),
+      menuInfo: () => this.menuInfo(),
+      onAchievements: () => this.ui.online?.openAchievements(this.ach.list().map((d) => ({ title: d.title, desc: d.desc, at: this.save.challenge?.achievements[d.id] ?? null }))),
     }, this.isTouch);
     this.ui.bindSave(this.save, this.quality);
     this.assets.onProgress = (d, t) => this.ui.setLoading(t ? d / t : 0);
@@ -112,7 +131,8 @@ export class Game {
     this.cam = new ThirdPersonCamera(this.physics, window.innerWidth / window.innerHeight);
     this.cam.autoFollow = this.save.settings.autoCam ?? this.isTouch;
     this.input = new Input(this.renderer.domElement);
-    this.input.onPointerLockLost = () => { if (this.state === 'playing') this.pause(); };
+    // losing the mouse pauses the game, except while the admin is typing a password or using the admin panel
+    this.input.onPointerLockLost = () => { if (this.state === 'playing' && !this.adminPrompt && !this.admin?.wantsCursor) this.pause(); };
     if (this.isTouch) this.touch = new TouchControls(this.input, this.container);
 
     this.env = new Environment(this.scene, this.renderer, { shadows: preset.shadows, shadowMap: preset.shadowMap, flare: this.quality !== 'low' });
@@ -124,8 +144,13 @@ export class Game {
 
     this.maps = new MapManager(this.assets, this.physics, this.scene, this.fx);
     this.ui.setLoading(0.05, 'Đang dựng Starter Village…');
-    await this.maps.loadRegistry();
-    await this.maps.load(this.maps.entry('map001')!);
+    // no network needed here: the app's own maps + whatever was downloaded before
+    await this.content.init();
+    this.assets.resolver = this.content.resolve;
+    this.maps.onLoadStart = (id) => this.content.pin(id);
+    this.content.onChange(() => { this.maps.syncGates((id, fb) => this.nextInfo(id, fb)); this.ui.refreshMaps?.(); });
+    this.maps.setRegistry(this.content.entries());
+    await this.maps.load(this.maps.registry[0]);
     this.map = this.maps.primary!;
     this.maps.setLodDistance(preset.lodDistance);
 
@@ -154,28 +179,75 @@ export class Game {
     this.renderer.compile(this.scene, this.cam.camera);
     const portraits = this.makePortraits();
     this.ui.hideLoading();
+    this.admin = new Admin({
+      player: this.player, cam: this.cam, input: this.input, maps: this.maps, physics: this.physics, touch: this.touch,
+      isPlaying: () => this.state === 'playing',
+      allowed: () => this.mode !== 'challenge',
+      markTestRun: () => {
+        if (this.score.test) return;
+        this.score.test = true;
+        this.ui.setTestBadge(true);
+        this.ui.toast('Lượt TEST', 'Đã dùng chế độ admin: lượt này không lưu kỷ lục');
+      },
+      toast: (a, b) => this.ui.toast(a, b ?? ''),
+      where: () => `${this.map.name}${this.lastZone ? ' · Khu ' + this.lastZone.id : ''} · ${this.player.state}`,
+      setGameInput: (on) => {
+        this.adminPrompt = !on;
+        this.input.enabled = on && this.state === 'playing';
+        if (!on) this.input.clearEdges();
+      },
+    }, this.container, this.ui.hudHeightEl);
     this.state = 'menu';
+    this.setupOnline();
     this.ui.showMenu(this.save, portraits, this.quality);
+    // first launch: the player picks a name (works offline; sent to the leaderboard when online)
+    if (!this.lb.hasName) { this.ui.online!.onNameSet = () => { this.ui.refreshMaps(); void this.lb.sync(); }; this.ui.online!.openName(true); }
+    else void this.lb.sync();
     this.clock.start();
     this.renderer.setAnimationLoop(() => this.frame());
     (window as unknown as { __game: Game }).__game = this;
     // the city above the clouds streams in behind the menu (seamless world: it is visible from the village)
+    this.startDevPacks();
     void this.loadOtherMaps();
+    // online? (background, short timeout, never blocks play) -> new maps / updates are offered in the menu
+    if (!this.devPacks) void this.content.check();
   }
 
   private otherMaps: Promise<void> | null = null;
+  private devPacks: Promise<void> | null = null;
+  /** Load every playable map that is not in the world yet (after startup, after a download). Chained: safe to
+   *  call any time; maps below are never unloaded, so a fall always lands on real geometry. */
   loadOtherMaps() {
-    if (!this.otherMaps) {
-      this.otherMaps = (async () => {
-        for (const e of this.maps.registry) {
-          if (this.maps.map(e.id)) continue;
-          try { await this.maps.load(e); } catch (err) { console.warn('map load failed', e.id, err); }
-        }
+    this.otherMaps = (this.otherMaps ?? Promise.resolve()).then(async () => {
+      if (this.devPacks) await this.devPacks;
+      this.maps.setRegistry(this.content.entries());
+      let added = false;
+      for (const e of this.maps.registry) {
+        if (this.maps.map(e.id)) continue;
+        try { await this.maps.load(e); added = true; } catch (err) { console.warn('map load failed', e.id, err); }
+      }
+      if (added) {
         this.maps.setLodDistance(QUALITY_PRESETS[this.quality].lodDistance);
         this.renderer.compile(this.scene, this.cam.camera);
-      })();
-    }
+        this.admin?.mapsChanged();
+      }
+      this.syncGates();
+    });
     return this.otherMaps;
+  }
+
+  /** `npm run dev`: keep every pack from packs/ installed and current (no download menu needed while
+   *  building maps). Off with ?autopacks=0 to try the real player flow. */
+  private startDevPacks() {
+    if (!import.meta.env.DEV || new URLSearchParams(location.search).get('autopacks') === '0') return;
+    this.devPacks = (async () => {
+      if (!(await this.content.check(15000))) return;
+      for (const s of this.content.statuses()) {
+        if (s.state === 'download' || s.state === 'update') {
+          try { await this.content.install(s.id); } catch (e) { console.warn('dev pack install failed', s.id, e); }
+        }
+      }
+    })();
   }
 
   /** Blob shadow projected straight down while airborne: shows where you will land, and how far below that is. */
@@ -218,7 +290,7 @@ export class Game {
   private setHudMap(m: MapData) {
     this.hudMap = m;
     const y0 = m.origin[1];
-    this.ui.setupHUD(m.zones, y0, y0 + m.height, this.save.personalBest);
+    this.ui.setupHUD(m.zones, y0, y0 + m.height, this.score.best);
   }
 
   private async loadCharacter(id: CharId) {
@@ -386,18 +458,28 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ flow
-  async start(mapId = 'map001') {
+  /** id of the bottom map (the app's own Starter Village) */
+  private get firstMapId() { return this.maps.registry[0]?.id ?? 'map001'; }
+  /** position of a map in the column (bottom = 0) */
+  private mapIndex(id: string | null) { return id ? this.maps.registry.findIndex((e) => e.id === id) : -1; }
+
+  async start(mapId?: string, mode?: GameMode) {
+    this.mode = mode ?? this.save.mode ?? 'adventure';
+    this.save.mode = this.mode;
+    this.score.mode = this.mode;
+    // Challenge: every run starts at 0 m – no continuing from a higher map, no teleports
+    mapId = this.mode === 'challenge' ? this.firstMapId : mapId ?? this.firstMapId;
     // phones: go fullscreen + landscape straight from the START tap (needs the user gesture)
     if (this.isTouch && fullscreenSupported() && !isFullscreen()) enterFullscreen();
     this.audio.init();
     this.audio.setVolume(this.save.settings.volume);
     this.ui.hideMenu();
-    if (mapId !== 'map001' && !this.maps.map(mapId)) {
-      this.ui.showLoading('Đang dựng Rooftop City…');
+    if (!this.maps.map(mapId)) {
+      this.ui.showLoading(`Đang dựng ${this.maps.entry(mapId)?.name ?? 'bản đồ'}…`);
       await this.loadOtherMaps();
       this.ui.hideLoading();
     }
-    const m = this.maps.map(mapId) ?? this.maps.map('map001')!;
+    const m = this.maps.map(mapId) ?? this.maps.map(this.firstMapId)!;
     this.startMap = m.id;
     this.player.spawnPoint.set(...m.spawn.p);
     this.player.spawnYaw = m.spawn.yaw;
@@ -415,14 +497,24 @@ export class Game {
     this.cam.snapTo(this.player.spawnPoint, this.player.spawnYaw + Math.PI);
     this.cam.pitch = 0.3;
     this.score.resetRun();
+    this.ui.setTestBadge(false);
+    this.ui.setModeBadge(this.mode === 'challenge');
+    this.admin?.reset();
+    if (this.mode === 'challenge') { challengeOf(this.save).runs++; writeSave(this.save); }
+    this.ach.startRun();
+    this.achMax = 0;
     this.reachedMilestones.clear();
     this.reachedZones.clear();
     this.fx.milestones.forEach((m) => (m.reached = false));
     this.finishedMaps.clear();
     // a run that starts in the city counts the village as done (and its milestones as passed)
-    if (this.startMap !== 'map001') {
-      this.finishedMaps.add('map001');
-      for (const ms of this.maps.map('map001')?.milestones ?? []) this.reachedMilestones.add(ms);
+    // a run that starts higher up counts the maps below as done (and their milestones as passed)
+    const si = this.mapIndex(this.startMap);
+    if (si > 0) {
+      for (const e of this.maps.registry.slice(0, si)) {
+        this.finishedMaps.add(e.id);
+        for (const ms of this.maps.map(e.id)?.milestones ?? []) this.reachedMilestones.add(ms);
+      }
       this.score.runMax = Math.max(this.score.runMax, this.player.spawnPoint.y);
     }
     const sm = this.maps.map(this.startMap);
@@ -466,19 +558,115 @@ export class Game {
     this.ui.showMenu(this.save, this.makePortraits(), this.quality);
   }
 
+  /** Name entry, maps panel (download / update), new-content notice, leaderboard. All of it works offline. */
+  private setupOnline() {
+    this.lb = new Leaderboard(this.save, () => this.firstMapId);
+    this.ach = new Achievements(this.save, () => [...this.maps.loaded.values()].map((m) => m.data).sort((x, y) => x.origin[1] - y.origin[1]));
+    const host = {
+      statuses: () => this.content.statuses(),
+      installing: () => this.content.installing,
+      contentOnline: () => this.content.online,
+      checkedAt: () => this.content.state.manifestAt,
+      install: async (id: string) => {
+        await this.content.install(id, () => this.ui.online?.refresh());
+        await this.loadOtherMaps(); // a new map joins the world right away (updates of a map in use: next start)
+        this.ui.refreshMaps();
+      },
+      remove: async (id: string) => { await this.content.remove(id); this.ui.refreshMaps(); },
+      check: async () => { await this.content.check(); },
+      pendingRestart: (id: string) => this.content.updatePendingRestart(id),
+      restartApp: () => location.reload(),
+      usage: () => this.content.store.usage(),
+      lbEnabled: () => this.lb.enabled,
+      board: (b: string) => this.lb.board(b),
+      boards: () => [{ id: 'height', label: 'Độ cao' }, ...this.content.statuses().map((s) => ({ id: `time:${s.id}`, label: s.name }))],
+      profile: () => this.lb.profile,
+      setName: (n: string) => this.lb.setName(n),
+      click: () => this.audio.click(),
+    };
+    this.ui.online = new OnlineUI(this.container, host);
+    // back online: send waiting results, look for new maps
+    window.addEventListener('online', () => { void this.lb.sync(); void this.content.check(); });
+  }
+
+  private menuInfo(): MenuInfo {
+    const reg = this.maps?.registry ?? [];
+    const hi = this.orderOf(this.save.highestMap);
+    const st = this.content.statuses();
+    const nameOf = (id: string) => st.find((s) => s.id === id)?.name ?? reg.find((e) => e.id === id)?.name ?? id;
+    // start from a higher map once the map below it was conquered (and it is on this device)
+    const continueFrom = reg.slice(1).filter((e, i) => (e.order ?? i + 2) - 1 <= hi)
+      .map((e) => ({ id: e.id, name: e.name, y: this.maps.map(e.id)?.spawn.p[1] ?? e.yMin }));
+    const conquered = this.save.highestMap ? nameOf(this.save.highestMap) : null;
+    let bestTime: MenuInfo['bestTime'] = null;
+    const times = this.save.bestTimes ?? {};
+    const top = Object.keys(times).filter((k) => times[k] > 0).sort((a, b) => this.orderOf(b) - this.orderOf(a))[0];
+    if (top) bestTime = { label: `Tốt nhất tới đỉnh ${nameOf(top)}`, value: times[top] };
+    else if (this.save.bestTime) bestTime = { label: `Tốt nhất tới đỉnh ${nameOf(this.firstMapId)}`, value: this.save.bestTime };
+    const p = this.lb?.profile;
+    const achList = this.ach?.list() ?? [];
+    return {
+      name: p?.name ?? null, tag: p?.tag, continueFrom, conquered, bestTime, news: this.content.news().length > 0,
+      mode: this.save.mode ?? 'adventure', challengeBest: this.save.challenge?.best ?? 0,
+      achievements: { got: achList.filter((a) => this.ach.has(a.id)).length, total: achList.length },
+    };
+  }
+
+  /** show newly unlocked achievements (one toast each, queued) */
+  private announce(list: AchDef[]) {
+    list.forEach((d, i) => setTimeout(() => { this.ui.toast('Thành tích mới!', d.title, true, 3000); this.audio.chime(); }, 400 + i * 3200));
+  }
+
+  /** column position of any known map (on the device or only announced by the server) */
+  private orderOf(id: string | null) {
+    if (!id) return 0;
+    return this.content.statuses().find((s) => s.id === id)?.order ?? this.mapIndex(id) + 1;
+  }
+
+  /** What the player is told about the map after `id` when it is not in the world (gate sign, finish panel). */
+  nextInfo(id: string, fallback: string): { title: string; sub: string; html: string } {
+    const s = this.content.statuses().find((x) => x.id === id);
+    const mb = (b: number) => `${Math.max(0.1, b / 1048576).toFixed(1)} MB`;
+    const title = s?.name ?? fallback;
+    let sub: string;
+    if (s?.state === 'download' || s?.state === 'update') sub = `Chưa có trên máy · Menu → Bản đồ để tải (${mb(s.bytes)})`;
+    else if (s?.state === 'needs-app') sub = 'Cần cập nhật ứng dụng để chơi map này';
+    else if (s?.source) sub = 'Đang dựng bản đồ…';
+    else if (this.content.online === false) sub = 'Kết nối mạng để kiểm tra map mới';
+    else sub = 'Sắp ra mắt – game sẽ báo khi có map mới';
+    return { title, sub, html: `Cổng sang <b>${title}</b><br><span style="font-weight:400;font-size:13px">${sub}</span>` };
+  }
+
+  /** close / open end-of-map gates after maps were added; announce a way that just opened */
+  private syncGates() {
+    const opened = this.maps.syncGates((id, fb) => this.nextInfo(id, fb));
+    if (this.state === 'playing') for (const id of opened) this.ui.toast('Cổng đã mở!', `Lối lên ${this.maps.entry(id)?.name ?? id} đã sẵn sàng`, true, 4000);
+  }
+
   private finish(md: MapData) {
     this.finishedMaps.add(md.id);
     const t = this.score.playTime;
-    const order = ['map001', 'map002'];
-    const firstTime = !this.save.highestMap || order.indexOf(this.save.highestMap) < order.indexOf(md.id);
-    if (firstTime) this.save.highestMap = md.id;
-    this.save.bestTimes = this.save.bestTimes ?? {};
-    const prevBest = this.save.bestTimes[md.id] ?? (md.id === 'map001' ? this.save.bestTime ?? undefined : undefined);
-    // a run started in the city does not count for village-to-city times
-    const valid = md.id === 'map001' || this.startMap === 'map001';
-    if (valid && (!prevBest || t < prevBest)) this.save.bestTimes[md.id] = t;
-    if (md.id === 'map001') { this.save.completions++; if (!this.save.bestTime || t < this.save.bestTime) this.save.bestTime = t; }
-    writeSave(this.save);
+    const test = this.score.test; // admin test run: no unlocks, no times, no completions
+    const firstTime = !test && (!this.save.highestMap || this.orderOf(this.save.highestMap) < this.orderOf(md.id));
+    if (!test && this.mode === 'challenge') {
+      // Challenge: records + achievements only (a challenge run always starts at 0 m, so every time is a full climb)
+      if (firstTime) this.save.highestMap = md.id;
+      const ch = challengeOf(this.save);
+      if (!ch.bestTimes[md.id] || t < ch.bestTimes[md.id]) ch.bestTimes[md.id] = t;
+      writeSave(this.save);
+      this.announce(this.ach.onFinish(md, t, this.firstMapId));
+      void this.lb.sync();
+    } else if (!test) {
+      if (firstTime) this.save.highestMap = md.id;
+      this.save.bestTimes = this.save.bestTimes ?? {};
+      const prevBest = this.save.bestTimes[md.id] ?? (md.id === 'map001' ? this.save.bestTime ?? undefined : undefined);
+      // times count for full climbs only (a run started higher up does not set a from-the-ground time)
+      const valid = md.id === this.firstMapId || this.startMap === this.firstMapId;
+      if (valid && (!prevBest || t < prevBest)) this.save.bestTimes[md.id] = t;
+      if (md.id === 'map001') { this.save.completions++; if (!this.save.bestTime || t < this.save.bestTime) this.save.bestTime = t; }
+      writeSave(this.save);
+      void this.lb.sync();
+    }
     this.audio.fanfare();
     this.fx.burst(new THREE.Vector3(...md.exit.p), '#9fe8ff');
     const next = this.maps.map(md.exit.next);
@@ -490,13 +678,12 @@ export class Game {
     this.state = 'finished';
     this.input.enabled = false;
     this.input.releasePointer();
-    const isCity = md.id === 'map002';
+    // end of what is on this device: the gate stays closed (safe), the map still counts as conquered
     this.ui.showFinish({
-      title: isCity ? 'Chinh phục Rooftop City!' : 'Chinh phục Map 001!',
-      time: t, best: this.save.personalBest, bestTime: this.save.bestTimes[md.id] ?? null, firstTime,
-      next: isCity ? 'Cổng sang <b>Map 003</b><br><span style="font-weight:400;font-size:13px">Sẽ mở trong bản cập nhật tiếp theo. Thử tìm 3 đường tắt của thành phố để về đích nhanh hơn!</span>'
-        : 'Cổng sang <b>Map 002 – Rooftop City</b><br><span style="font-weight:400;font-size:13px">Đang tải thành phố… thử lại sau giây lát.</span>',
-      hint: isCity ? 'Gợi ý: có một mái nhà ẩn phía sau cần cẩu…' : 'Gợi ý: Map 001 có 3 đường tắt khó – bạn đã tìm thấy đường nào chưa?',
+      title: `Chinh phục ${md.name}!`,
+      time: t, best: this.score.best, bestTime: (this.mode === 'challenge' ? challengeOf(this.save).bestTimes[md.id] : this.save.bestTimes?.[md.id]) ?? null, firstTime,
+      next: this.nextInfo(md.exit.next, md.exit.label).html,
+      hint: md.finishHint ?? 'Thử tìm đường tắt để về đích nhanh hơn!',
     }, () => { this.state = 'playing'; this.input.enabled = true; this.clock.getDelta(); }, () => { this.state = 'playing'; this.input.enabled = true; this.restart(); });
   }
 
@@ -514,6 +701,7 @@ export class Game {
       else if (this.state === 'paused') this.resume();
     }
 
+    this.admin?.frame(dt);
     if (this.state === 'playing') this.updatePlaying(dt);
     else if (this.state === 'menu' || this.state === 'loading') {
       this.simTime += dt;
@@ -550,6 +738,7 @@ export class Game {
       this.simTime += PHYS.fixedDt;
       this.maps.stepMovers(this.simTime, PHYS.fixedDt);
       this.player.fixedUpdate(PHYS.fixedDt, this.input, this.cam.yaw);
+      this.admin?.fixedUpdate(PHYS.fixedDt);
       this.physics.step();
       this.acc -= PHYS.fixedDt;
       steps++;
@@ -570,14 +759,17 @@ export class Game {
       this.map = here;
       this.setHudMap(here);
       if (fellBack) this.ui.toast(`Rơi xuống ${here.name}`, `Kỷ lục lượt này vẫn giữ: ${Math.floor(this.score.runMax)} m — leo lại thôi!`, false, 3600);
-      else if (here.id !== 'map001') this.ui.toast(here.name, `Map ${here.id.slice(3)} · ${here.origin[1]}–${here.origin[1] + here.height} m`, true, 3200);
+      else if (here.id !== this.firstMapId) this.ui.toast(here.name, `Map ${here.id.slice(3)} · ${here.origin[1]}–${here.origin[1] + here.height} m`, true, 3200);
     }
     const height = this.player.feetY;
-    if (this.score.update(dt, height)) { this.ui.toast('Kỷ lục mới!', `Vượt kỷ lục cá nhân cũ`, true); this.audio.chime(); }
+    if (this.score.update(dt, height)) { this.ui.toast('Kỷ lục mới!', this.mode === 'challenge' ? 'Vượt kỷ lục Thử thách cũ' : 'Vượt kỷ lục cá nhân cũ', true); this.audio.chime(); }
+    if (this.mode === 'challenge' && !this.score.test && this.score.runMax > this.achMax + 0.5) {
+      this.achMax = this.score.runMax;
+      this.announce(this.ach.onHeight(this.score.runMax));
+    }
 
     // milestones (all loaded maps)
-    for (const md of [this.maps.map('map001'), this.maps.map('map002')]) {
-      if (!md) continue;
+    for (const { data: md } of this.maps.loaded.values()) {
       for (const m of md.milestones) {
         if (!this.reachedMilestones.has(m) && this.score.runMax >= m) {
           this.reachedMilestones.add(m);
@@ -595,13 +787,13 @@ export class Game {
       const key = `${z.map.id}:${z.zone.id}`;
       if (!this.reachedZones.has(key)) {
         this.reachedZones.add(key);
-        if (!(z.map.id === 'map001' && z.zone.id === 'A')) this.ui.toast(`Khu ${z.zone.id}`, z.zone.name);
+        if (!(z.map.id === this.firstMapId && z.zone === z.map.zones[0])) this.ui.toast(`Khu ${z.zone.id}`, z.zone.name);
       }
       this.lastZone = z.zone;
     }
     // map exits
-    for (const md of [this.maps.map('map001'), this.maps.map('map002')]) {
-      if (!md || this.finishedMaps.has(md.id)) continue;
+    for (const { data: md } of this.maps.loaded.values()) {
+      if (this.finishedMaps.has(md.id)) continue;
       const ex = md.exit;
       if (Math.hypot(feet.x - ex.p[0], feet.y - ex.p[1], feet.z - ex.p[2]) < ex.r) this.finish(md);
     }
@@ -612,7 +804,9 @@ export class Game {
     if (P.state === 'hang') camMode = 'hang';
     else if (P.state === 'air') camMode = P.padFlight && P.vel.y > -10 ? 'pad' : P.padFlight || P.vel.y < -14 || P.feetY < P.airBaseY - 0.4 ? 'fall' : 'jump';
     const iy = this.input.moveY, ix = this.input.moveX;
-    const alignOK = P.state === 'ground' && P.speed > 3.5 && iy > 0.6 && Math.abs(ix) < 0.3;
+    const flying = !!this.admin?.flying;
+    if (flying) camMode = 'run';
+    const alignOK = !flying && P.state === 'ground' && P.speed > 3.5 && iy > 0.6 && Math.abs(ix) < 0.3;
     this.ui.setSpeedLines(P.state === 'air' ? Math.max(0, (-P.vel.y - 18) / 22, P.padFlight && P.vel.y > 6 ? 0.35 : 0) : 0);
     // camera dynamics: pad launch (pull back + wider), apex (steady), descent (tilt toward the landing), long falls
     let cd = 0, cf = 0, cpitch = 0, sharp = 4;
@@ -632,10 +826,13 @@ export class Game {
     this.updateDropShadow();
     this.cam.update(dt, feet, P.yaw, camMode, { airBaseY: P.airBaseY, alignOK });
 
+    // results improved while playing: send them now and then (no-op offline / without changes)
+    this.lbTimer -= dt;
+    if (this.lbTimer <= 0) { this.lbTimer = 90; if (this.lb.dirty) void this.lb.sync(); }
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) {
       this.hudTimer = 0.1;
-      this.ui.updateHUD({ current: this.score.current, runMax: this.score.runMax, best: this.save.personalBest, time: this.score.playTime, zone: this.lastZone, fps: this.save.settings.showFps ? this.fpsAvg : undefined });
+      this.ui.updateHUD({ current: this.score.current, runMax: this.score.runMax, best: this.score.best, time: this.score.playTime, zone: this.lastZone, fps: this.save.settings.showFps ? this.fpsAvg : undefined });
       if (!this.isTouch) this.ui.setHint(this.input.pointerLocked ? null : 'Nhấp chuột vào màn hình để điều khiển camera');
     }
   }
@@ -659,6 +856,7 @@ export class Game {
         this.audio.land(0.2 + k);
         this.fx.dust.emit(feet, 4 + Math.round(k * 16), { speed: 2 + k * 4, up: 0.4, life: 0.6 + k * 0.5, size: 0.5 + k * 0.6 });
         if (e.drop > 6 && this.player.state !== 'roll') { this.cam.addShake(Math.min(0.9, e.drop / 25)); this.haptic(Math.min(60, 10 + e.drop * 3)); }
+        if (this.mode === 'challenge' && !this.score.test) this.announce(this.ach.onLand(e.drop, this.score.runMax));
         break;
       }
       case 'catch':

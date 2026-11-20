@@ -146,3 +146,96 @@ kbd { font-family: var(--font); background: rgba(255,255,255,.18); border-radius
   .toast .t2 { font-size: 11.5px; }
   .panel h2 { font-size: 24px; margin-bottom: 8px; }
 }
+
+/* ---------- admin / map test (hidden unless unlocked) ---------- */
+.test-badge { position: absolute; top: 8px; right: 10px; padding: 2px 7px; border-radius: 6px; background: #e5484d; color: #fff; font: 800 12px/1.3 var(--font); letter-spacing: .5px; text-shadow: none; }
+.admin-panel { position: absolute; z-index: 30; left: max(14px, env(safe-area-inset-left)); top: calc(max(12px, env(safe-area-inset-top)) + 118px); width: 330px; max-width: calc(100vw - 28px); background: rgba(10, 20, 36, .86); border: 1px solid rgba(255, 120, 120, .55); border-radius: 12px; padding: 8px 10px; font-size: 12px; pointer-events: auto; touch-action: none; backdrop-filter: blur(4px); }
+.admin-panel .ap-head { display: flex; align-items: center; gap: 8px; }
+.admin-panel .ap-head b { color: #ff8a8a; letter-spacing: 1px; }
+.admin-panel .ap-pos { flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.admin-panel .ap-head button { width: 24px; height: 24px; border-radius: 6px; border: none; background: rgba(255,255,255,.12); color: #fff; font-weight: 800; padding: 0; }
+.admin-panel .ap-row { display: flex; gap: 6px; margin-top: 6px; }
+.admin-panel .ap-row button, .admin-panel select { flex: 1; min-height: 32px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.1); color: #fff; font-size: 12px; font-weight: 600; padding: 4px 6px; }
+.admin-panel select { flex: 3; }
+.admin-panel select option, .admin-panel select optgroup { color: #000; }
+.admin-panel .ap-main.on { background: #e5484d; border-color: #e5484d; }
+.admin-panel .ap-small button { min-height: 26px; font-weight: 500; opacity: .85; }
+.admin-panel .ap-help { margin-top: 6px; font-size: 10.5px; opacity: .7; line-height: 1.35; }
+.admin-panel.min { width: auto; }
+.admin-panel.min .ap-body, .admin-panel.min [data-a=min] { display: none; }
+.admin-prompt .panel { max-width: 320px; }
+.admin-prompt .ap-input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.12); color: #fff; font-size: 16px; user-select: text; -webkit-user-select: text; }
+.admin-prompt .ap-remember { display: block; margin: 10px 0 4px; font-size: 13px; opacity: .85; }
+.admin-prompt .ap-err { min-height: 18px; color: #ff9b9b; font-size: 13px; font-weight: 600; }
+@media (max-height: 520px) {
+  .admin-panel { top: calc(max(12px, env(safe-area-inset-top)) + 82px); width: 300px; padding: 6px 8px; }
+  .admin-panel .ap-row button, .admin-panel select { min-height: 28px; font-size: 11px; }
+  .admin-panel .ap-help { display: none; }
+}
+
+/* ---------- player name / maps / leaderboard (online parts, all usable offline) ---------- */
+.player-chip { margin-top: 8px; border: none; background: rgba(0,0,0,.28); color: #fff; padding: 5px 14px; border-radius: 16px; font-size: 13px; font-weight: 600; }
+.player-chip i { font-style: normal; opacity: .7; }
+.player-chip u { text-decoration: none; color: var(--gold); }
+.btn.dot { position: relative; }
+.btn.dot::after { content: ''; position: absolute; top: 6px; right: 8px; width: 10px; height: 10px; border-radius: 50%; background: #ff5a5f; box-shadow: 0 0 0 2px #fff; }
+.news { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; background: rgba(12, 40, 70, .82); border: 2px solid rgba(255, 209, 102, .7); border-radius: 14px; padding: 8px 12px; font-size: 14px; max-width: min(560px, 92vw); }
+.news .btn.secondary { padding: 6px 14px; font-size: 13px; box-shadow: 0 3px 0 #8aa6c4; }
+.news .more { background: var(--gold); color: #3a2400; border-radius: 8px; padding: 0 6px; font-weight: 800; font-size: 12px; }
+.name-input { width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 12px; border: 2px solid rgba(255,255,255,.3); background: rgba(255,255,255,.12); color: #fff; font-size: 20px; font-weight: 700; text-align: center; user-select: text; -webkit-user-select: text; }
+.name-err { min-height: 18px; color: #ff9b9b; font-size: 13px; font-weight: 600; text-align: center; margin-top: 6px; }
+.maps-panel, .lb-panel { width: min(520px, 94vw); }
+.maps-list { display: flex; flex-direction: column; gap: 8px; }
+.map-row { display: flex; gap: 10px; align-items: center; background: rgba(255,255,255,.07); border-radius: 12px; padding: 10px 12px; }
+.map-row.update, .map-row.download { border: 1px solid rgba(255, 209, 102, .55); }
+.mr-main { flex: 1; min-width: 0; }
+.mr-name { font-weight: 800; font-size: 15px; }
+.mr-y { font-weight: 500; font-size: 12px; opacity: .7; margin-left: 4px; }
+.mr-sum { font-size: 12px; opacity: .75; margin-top: 2px; }
+.mr-chip { font-size: 12.5px; color: var(--gold); margin-top: 4px; font-weight: 600; }
+.mr-err { font-size: 12px; color: #ff9b9b; margin-top: 4px; }
+.mr-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); margin-top: 6px; overflow: hidden; }
+.mr-bar > div { height: 100%; background: linear-gradient(90deg, #ffd166, #ff9f2e); transition: width .2s; }
+.mini { border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.1); color: #fff; border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.mini.on { background: var(--gold); color: #3a2400; border-color: var(--gold); }
+.mini:disabled { opacity: .5; }
+.maps-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 12.5px; opacity: .9; }
+.lb-tabs { margin: 0 auto 10px; justify-content: center; flex-wrap: wrap; width: fit-content; }
+.lb-list { display: flex; flex-direction: column; gap: 3px; max-height: 46vh; overflow: auto; }
+.lb-row { display: grid; grid-template-columns: 44px 1fr auto; gap: 8px; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,.05); font-size: 14px; }
+.lb-row .r { font-weight: 800; opacity: .8; }
+.lb-row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-row .n i { font-style: normal; opacity: .55; font-size: 12px; }
+.lb-row .v { font-weight: 800; color: var(--gold); }
+.lb-row.me { background: rgba(255, 209, 102, .22); outline: 1px solid rgba(255, 209, 102, .6); }
+.lb-empty { text-align: center; padding: 22px 8px; opacity: .85; font-size: 14px; line-height: 1.5; }
+.lb-foot { text-align: center; font-size: 12px; opacity: .75; margin-top: 8px; }
+@media (max-height: 520px) {
+  .player-chip { margin-top: 4px; font-size: 12px; padding: 3px 10px; }
+  .news { font-size: 12px; padding: 5px 8px; }
+  .lb-list { max-height: 40vh; }
+  .map-row { padding: 6px 10px; }
+}
+
+/* ---------- modes / achievements ---------- */
+.modes { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.btn.mode { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 220px; padding: 12px 22px; }
+.btn.mode b { font-size: 21px; letter-spacing: .5px; }
+.btn.mode span { font-size: 12px; font-weight: 600; opacity: .8; }
+.btn.mode.challenge { background: linear-gradient(180deg, #ff8f7a, #e5484d); color: #fff; box-shadow: 0 5px 0 #9e2a2e, 0 10px 20px rgba(0,0,0,.2); }
+.btn.mode.last { outline: 3px solid rgba(255,255,255,.85); outline-offset: 2px; }
+.mode-badge { position: absolute; top: 8px; right: 10px; padding: 2px 7px; border-radius: 6px; background: #e5484d; color: #fff; font: 800 11px/1.3 var(--font); letter-spacing: .5px; }
+.test-badge:not(.hidden) ~ .mode-badge { top: 30px; }
+.ach-list .ach { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.05); opacity: .6; }
+.ach-list .ach.got { opacity: 1; background: rgba(255, 209, 102, .16); }
+.ach-list .ach b { font-size: 14px; }
+.ach-list .ach.got b { color: var(--gold); }
+.ach-list .ach span { font-size: 12px; opacity: .85; }
+.lb-modes { margin-bottom: 6px; }
+@media (max-height: 520px) {
+  .btn.mode { min-width: 170px; padding: 8px 14px; }
+  .btn.mode b { font-size: 16px; }
+  .btn.mode span { font-size: 10px; }
+}
+.menu { overflow-y: auto; }
+.menu .center { gap: 11px; }

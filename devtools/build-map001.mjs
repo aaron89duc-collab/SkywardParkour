@@ -1,7 +1,7 @@
 // Map 001 – Starter Village. Hand-authored layout; connectors are deterministic.
 // Run: node devtools/build-map001.mjs  -> public/maps/map001.json (+ devtools/out/map001_plan.png)
 import fs from 'fs';
-import { MapBuilder, r2 } from './mapgen/lib.mjs';
+import { MapBuilder, r2, makeWaypoints } from './mapgen/lib.mjs';
 import { plotMap } from './mapgen/plot.mjs';
 
 const B = new MapBuilder({ radius: 85 });
@@ -396,7 +396,9 @@ const zones = [
 const data = B.toJSON({
   id: 'map001', name: 'Starter Village', version: 1, height: 140, origin: [0, 0, 0],
   spawn: { p: SPAWN, yaw: Math.PI },
-  exit: { p: EXIT.map(r2), r: 2.6, next: 'map002', label: 'Map 002 – Rooftop City' },
+  // gate: the podium's north edge, where Rooftop City's bridge attaches (closed while the city is not on the device)
+  exit: { p: EXIT.map(r2), r: 2.6, next: 'map002', label: 'Map 002 – Rooftop City', gate: { p: [-9, 140, -40.45], yaw: 0, w: 4.8, h: 4.2 } },
+  finishHint: 'Gợi ý: Map 001 có 3 đường tắt khó – bạn đã tìm thấy đường nào chưa?',
   zones, milestones: MILESTONES,
   region: { c: [0, 0], r: 85 },
   terrain: {
@@ -409,6 +411,7 @@ const data = B.toJSON({
       { a: [0, 7], b: [-26, 9], w: 3 }, { a: [0, 7], b: [33, -4], w: 3 }, { a: [0, 37], b: [-12, 30], w: 2.6 }, { a: [0, -30], b: [-16, -24], w: 2.4 },
     ],
   },
+  waypoints: makeWaypoints(B.routes, zones, { S1: 'S1 – đường tắt', S2: 'S2 – mái ẩn', S3: 'S3 – bậu cửa tháp kính' }),
 });
 fs.writeFileSync(new URL('../public/maps/map001.json', import.meta.url), JSON.stringify(data));
 fs.mkdirSync(new URL('./out/', import.meta.url), { recursive: true });

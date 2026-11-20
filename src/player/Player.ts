@@ -206,6 +206,16 @@ export class Player {
     this.renderPos.copy(feet);
   }
 
+  /** Admin fly mode: move without collisions, keeping render interpolation smooth (frozen must be true). */
+  flyTo(p: THREE.Vector3, yaw?: number) {
+    this.pos.copy(p);
+    if (yaw !== undefined) this.yaw = yaw;
+    this.vel.set(0, 0, 0);
+    this.state = 'air';
+    this.ledge = null; this.move = null; this.ladder = null; this.riding = null; this.padFlight = null; this.padCharge = null;
+    this.setBody();
+  }
+
   private setBody() {
     this.body.setNextKinematicTranslation({ x: this.pos.x, y: this.pos.y, z: this.pos.z });
   }

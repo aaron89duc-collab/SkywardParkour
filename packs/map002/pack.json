@@ -1,0 +1,15 @@
+{
+ "id": "map002",
+ "name": "Rooftop City",
+ "order": 2,
+ "yMin": 141.5,
+ "yMax": 400,
+ "entry": "maps/map002.json",
+ "minApp": 1,
+ "requires": [
+  "map001"
+ ],
+ "summary": "Thành phố mái nhà lơ lửng trên Starter Village · 140 → 320 m · 6 khu · cần cẩu, Sky Jump Pad",
+ "version": 2,
+ "contentHash": "4356e01223ce4aefe37942a79ef4eb3f63608b400a7da5f7168867c2795b2cfa"
+}

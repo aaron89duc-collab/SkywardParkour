@@ -19,9 +19,17 @@ export function reach(dh) {
 // ---------------------------------------------------------------- prefab height grids from collision meshes
 const G = 48;
 function loadPrefabGrid(id) {
-  const dirs = ['map001', 'map002'];
-  const dir = dirs.find((d) => fs.existsSync(path.join(ROOT, 'public/assets', d, `${id}.col.bin`)));
-  const buf = fs.readFileSync(path.join(ROOT, 'public/assets', dir, `${id}.col.bin`));
+  // bundled assets (public/assets/<map>) or a downloadable pack (packs/<map>/assets/<map>)
+  const roots = [path.join(ROOT, 'public/assets')];
+  if (fs.existsSync(path.join(ROOT, 'packs'))) for (const p of fs.readdirSync(path.join(ROOT, 'packs'))) roots.push(path.join(ROOT, 'packs', p, 'assets'));
+  let file = null;
+  for (const r of roots) {
+    if (!fs.existsSync(r)) continue;
+    for (const d of fs.readdirSync(r)) { const f = path.join(r, d, `${id}.col.bin`); if (fs.existsSync(f)) { file = f; break; } }
+    if (file) break;
+  }
+  if (!file) throw new Error(`prefab ${id}: no .col.bin under public/assets or packs/*/assets`);
+  const buf = fs.readFileSync(file);
   const nv = buf.readUInt32LE(0), ni = buf.readUInt32LE(4);
   const pos = new Float32Array(buf.buffer.slice(buf.byteOffset + 8, buf.byteOffset + 8 + nv * 12));
   const idx = new Uint32Array(buf.buffer.slice(buf.byteOffset + 8 + nv * 12, buf.byteOffset + 8 + nv * 12 + ni * 4));
@@ -596,4 +604,25 @@ export function inBox(b, yawDeg, x, z, pad = 0) {
   const dx = x - b.c[0], dz = z - b.c[2];
   const lx = dx * c - dz * sn, lz = dx * sn + dz * c;
   return Math.abs(lx) <= b.h[0] + pad && Math.abs(lz) <= b.h[2] + pad;
+}
+
+/**
+ * Admin / test teleport targets: spawn, where the main route enters each zone, the start of every
+ * shortcut / secondary route, and the exit. Positions are feet positions on real route points (standable).
+ */
+export function makeWaypoints(routes, zones, names = {}) {
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const out = [];
+  const main = routes.main ?? [];
+  if (main.length) out.push({ label: 'Điểm xuất phát', p: main[0].p.map(r2) });
+  for (const z of zones) {
+    const pt = main.find((q) => q.p[1] >= z.y0 + 0.5 && q.p[1] < z.y1);
+    if (pt && pt !== main[0]) out.push({ label: `Khu ${z.id} – ${z.name}`, p: pt.p.map(r2) });
+  }
+  for (const [k, pts] of Object.entries(routes)) {
+    if (k === 'main' || k === 'dead' || !pts.length) continue;
+    out.push({ label: names[k] ?? `Tuyến ${k}`, p: pts[0].p.map(r2) });
+  }
+  if (main.length > 1) out.push({ label: 'Gần đích', p: main[main.length - 2].p.map(r2) });
+  return out;
 }

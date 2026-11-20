@@ -108,7 +108,17 @@ export interface MapData {
   height: number;
   origin: V3;
   spawn: { p: V3; yaw: number };
-  exit: { p: V3; r: number; next: string; label: string };
+  exit: {
+    p: V3; r: number; next: string; label: string;
+    /** where the next map's path attaches: closed by an energy wall (w x h, facing yaw) until that map is loaded */
+    gate?: { p: V3; yaw: number; w: number; h: number };
+  };
+  /** extra prefab models of this map: id -> logical path without extension (pack assets) */
+  prefabFiles?: Record<string, string>;
+  /** self-lit prefabs: id -> emissive intensity */
+  emissive?: Record<string, number>;
+  /** shown when the map is finished (end-of-content hint) */
+  finishHint?: string;
   zones: ZoneData[];
   milestones: number[];
   terrain: TerrainData;
@@ -122,6 +132,8 @@ export interface MapData {
   pads?: PadData[];
   rings?: RingData[];
   ladders?: LadderData[];
+  /** admin / test teleport targets (feet positions on standable route points) */
+  waypoints?: { label: string; p: V3 }[];
   /** horizontal region of this map (for "which map am I in") */
   region?: { c: [number, number]; r: number };
 }
@@ -147,4 +159,6 @@ export interface MapRegistryEntry {
   file: string;
   yMin: number;
   yMax: number;
+  /** position in the column, bottom = 1 */
+  order?: number;
 }

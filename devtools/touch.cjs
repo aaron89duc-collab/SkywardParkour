@@ -2,15 +2,16 @@
 // Checks: dead zone + walk/run response, base follows the thumb, a camera swipe sliding over JUMP never presses it,
 // a held JUMP that slides off the button stays held, stick + jump + look with three fingers at once.
 // Usage: node devtools/touch.cjs
+const seedProfile = (c) => c.addInitScript(() => { try { const k = 'skyward-parkour.save.v1'; const s = JSON.parse(localStorage.getItem(k) || '{}'); if (!s.profile) { s.profile = { name: 'Tester', id: 'test-tools-0001', token: 'e'.repeat(64) }; localStorage.setItem(k, JSON.stringify(s)); } } catch {} });
 const { chromium, devices } = require('playwright');
 (async () => {
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const ctx = await browser.newContext({ ...devices['iPhone 13 landscape'] });
+  const ctx = await browser.newContext({ ...devices['iPhone 13 landscape'] }); await seedProfile(ctx);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   await page.goto('http://127.0.0.1:5173/');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 240000 });
-  await page.tap('[data-a=start]');
+  await page.tap('[data-mode=adventure]');
   await page.waitForFunction(() => window.__game.state === 'playing', null, { timeout: 60000 });
   await page.evaluate(() => { const g = window.__game; g.renderer.setAnimationLoop(null); });
   const cdp = await ctx.newCDPSession(page);

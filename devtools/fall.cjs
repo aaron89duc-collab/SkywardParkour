@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   await page.goto('http://127.0.0.1:5173/');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 240000 });
-  await page.evaluate(() => window.__game.loadOtherMaps());
+  await page.evaluate(async () => { const g = window.__game; g.renderer.setAnimationLoop(null); await g.loadOtherMaps(); });
   await page.evaluate(() => { const g = window.__game; g.renderer.setAnimationLoop(null); g.state = 'playing'; g.input.enabled = true; g.score.resetRun(); });
   const res = await page.evaluate(({ N, SEED }) => {
     const g = window.__game, P = g.player, I = g.input, V = P.pos.constructor;

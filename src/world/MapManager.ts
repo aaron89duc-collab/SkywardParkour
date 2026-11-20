@@ -10,6 +10,7 @@ import { Effects } from '../fx/Effects';
 import { MoverSystem } from './Movers';
 import { BoosterSystem, type Ladder } from './Boosters';
 import type RAPIER from '@dimforge/rapier3d-compat';
+import { GateSystem } from './Gates';
 
 type LoadedMap = {
   entry: MapRegistryEntry;
@@ -34,14 +35,28 @@ export class MapManager {
   private ladderList: Ladder[] = [];
   private loading = new Map<string, Promise<MapData>>();
 
+  gates: GateSystem;
+
   constructor(private assets: Assets, private physics: Physics, private scene: THREE.Scene, private fx: Effects) {
     this.root.name = 'maps';
     scene.add(this.root);
+    this.gates = new GateSystem(physics);
+    scene.add(this.gates.group);
   }
 
-  async loadRegistry() {
-    this.registry = await this.assets.json<MapRegistryEntry[]>('maps/index.json');
+  /** close / open the end-of-map gates (next map missing / loaded); returns ids of maps whose way just opened */
+  syncGates(text: (nextId: string, fallback: string) => { title: string; sub: string }) {
+    return this.gates.sync([...this.loaded.values()].map((m) => m.data), (id) => this.loaded.has(id), text);
   }
+
+  /** maps playable on this device, bottom to top (from the content manager: app + downloads) */
+  setRegistry(entries: MapRegistryEntry[]) {
+    this.registry = [...entries].sort((a, b) => (a.order ?? a.yMin) - (b.order ?? b.yMin));
+  }
+  /** called when a map starts loading (the content manager pins its files for this session) */
+  onLoadStart: ((id: string) => void) | null = null;
+  /** called when a map has been added to the world */
+  onLoaded: ((id: string) => void) | null = null;
 
   /** Load every map whose vertical range is within `margin` of the given height. */
   async ensureAround(y: number, margin = 80) {
@@ -55,7 +70,12 @@ export class MapManager {
     const done = this.loaded.get(entry.id);
     if (done) return Promise.resolve(done.data);
     let p = this.loading.get(entry.id);
-    if (!p) { p = this.loadNow(entry); this.loading.set(entry.id, p); }
+    if (!p) {
+      this.onLoadStart?.(entry.id);
+      p = this.loadNow(entry).then((d) => { this.onLoaded?.(entry.id); return d; });
+      p.catch(() => this.loading.delete(entry.id));
+      this.loading.set(entry.id, p);
+    }
     return p;
   }
 
@@ -89,7 +109,7 @@ export class MapManager {
     }
 
     const prefabs = new PrefabSystem(this.assets, this.physics);
-    await prefabs.build([...data.prefabs, ...(data.scenery ?? []).map((s) => ({ ...s, col: false, scenery: true }))]);
+    await prefabs.build([...data.prefabs, ...(data.scenery ?? []).map((s) => ({ ...s, col: false, scenery: true }))], data.prefabFiles, data.emissive);
     group.add(prefabs.group);
 
     let sprites: SpriteSystem | null = null;
@@ -187,6 +207,7 @@ export class MapManager {
       m.sprites?.update(time, tint);
       m.boosters.update(dt, time);
     }
+    this.gates.update(time);
   }
 
   setLodDistance(d: number) {

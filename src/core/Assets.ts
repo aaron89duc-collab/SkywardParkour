@@ -17,6 +17,13 @@ export class Assets {
   private pending = 0;
   private done = 0;
   onProgress: ((done: number, total: number) => void) | null = null;
+  /** downloaded content: maps a logical path to a blob: URL (null = file inside the app) */
+  resolver: ((path: string) => Promise<string | null>) | null = null;
+
+  private async url(path: string) {
+    const r = this.resolver ? await this.resolver(path) : null;
+    return r ?? assetUrl(path);
+  }
 
   constructor() {
     this.loader = new GLTFLoader();
@@ -33,7 +40,7 @@ export class Assets {
   gltf(path: string): Promise<GLTF> {
     let p = this.gltfCache.get(path);
     if (!p) {
-      p = this.track(this.loader.loadAsync(assetUrl(path)));
+      p = this.track(this.url(path).then((u) => this.loader.loadAsync(u)));
       this.gltfCache.set(path, p);
     }
     return p;
@@ -43,7 +50,7 @@ export class Assets {
     let p = this.colCache.get(path);
     if (!p) {
       p = this.track(
-        fetch(assetUrl(path)).then(async (r) => {
+        this.url(path).then((u) => fetch(u)).then(async (r) => {
           if (!r.ok) throw new Error(`Cannot load ${path}`);
           const buf = await r.arrayBuffer();
           const dv = new DataView(buf);
@@ -62,7 +69,7 @@ export class Assets {
   texture(path: string, srgb = true): Promise<THREE.Texture> {
     let p = this.texCache.get(path);
     if (!p) {
-      p = this.track(this.texLoader.loadAsync(assetUrl(path)).then((t) => {
+      p = this.track(this.url(path).then((u) => this.texLoader.loadAsync(u)).then((t) => {
         if (srgb) t.colorSpace = THREE.SRGBColorSpace;
         t.anisotropy = 4;
         return t;
@@ -73,7 +80,7 @@ export class Assets {
   }
 
   json<T = unknown>(path: string): Promise<T> {
-    return this.track(fetch(assetUrl(path)).then((r) => {
+    return this.track(this.url(path).then((u) => fetch(u)).then((r) => {
       if (!r.ok) throw new Error(`Cannot load ${path}`);
       return r.json() as Promise<T>;
     }));

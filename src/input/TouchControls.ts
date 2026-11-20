@@ -100,7 +100,7 @@ export class TouchControls {
       this.resets.push(() => { if (id !== null) { id = null; btn.classList.remove('down'); up(performance.now()); } });
     };
     bindButton(this.jumpBtn, (t) => { this.input.pressJump(t); this.input.touchJumpHeld = true; }, (t) => { this.input.releaseJump(t); this.input.touchJumpHeld = false; });
-    bindButton(this.dropBtn, () => this.input.pressDrop(), () => {});
+    bindButton(this.dropBtn, () => { this.input.pressDrop(); this.input.touchDropHeld = true; }, () => { this.input.touchDropHeld = false; });
 
     // app switch / notification shade: never leave a stick or button stuck down
     const resetAll = () => this.reset();
@@ -166,7 +166,16 @@ export class TouchControls {
     this.root.classList.toggle('hidden', !v);
   }
 
+  private fly = false;
+  /** admin fly mode: hold NHẢY to rise, THẢ to sink */
+  setFly(on: boolean) {
+    this.fly = on;
+    this.jumpBtn.textContent = on ? 'LÊN' : 'NHẢY';
+    this.dropBtn.textContent = on ? 'XUỐNG' : 'THẢ';
+  }
+
   setHanging(h: boolean) {
+    if (this.fly) return;
     this.jumpBtn.textContent = h ? 'LEO' : 'NHẢY';
     this.dropBtn.classList.toggle('emph', h);
   }

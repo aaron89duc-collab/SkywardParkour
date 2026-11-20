@@ -1,8 +1,8 @@
 // Map 002 – Rooftop City (140 -> 320 m). A city on a floating deck beside the village, reached by a sky bridge.
 // Hand-authored: real buildings, rooftops, fire escapes, balconies, a working crane, billboards, a glass tower crown.
-// Run: node devtools/build-map002.mjs -> public/maps/map002.json (+ devtools/out/map002_plan.png, routes002.json)
+// Run: node devtools/build-map002.mjs -> packs/map002/maps/map002.json (downloadable pack) (+ devtools/out/map002_plan.png, routes002.json)
 import fs from 'fs';
-import { MapBuilder, r2 } from './mapgen/lib.mjs';
+import { MapBuilder, r2, makeWaypoints } from './mapgen/lib.mjs';
 import { plotMap } from './mapgen/plot.mjs';
 
 const DECK = 140;
@@ -681,14 +681,18 @@ const spawnYaw = r2(Math.atan2(J1_W[0] - SPAWN_W[0], J1_W[2] - SPAWN_W[2]));
 const data = B.toJSON({
   id: 'map002', name: 'Rooftop City', version: 1, height: 180, origin: [0, DECK, 0],
   spawn: { p: SPAWN_W, yaw: spawnYaw },
-  exit: { p: EXIT_W.map(r2), r: 2.8, next: 'map003', label: 'Map 003' },
+  // gate: the summit's west edge (opposite the arrival), where Map 003's path will attach. Until Map 003 is on the
+  // device it is closed: the 320 m summit is a safe end, finishing still counts.
+  exit: { p: EXIT_W.map(r2), r: 2.8, next: 'map003', label: 'Map 003', gate: { p: [-39.05, 318.74, -9.18], yaw: Math.PI / 2, w: 4.4, h: 4.2 } },
+  finishHint: 'Gợi ý: có một mái nhà ẩn phía sau cần cẩu…',
   zones, milestones: MILESTONES,
   region: { c: [CX2, CZ2], r: R },
   // no ground of its own: the city floats above Starter Village, whose ring wall (up to 340 m) keeps everyone in
   terrain: { style: 'none', radius: 0, plazas: [], paths: [] },
   movers, pads, rings, ladders,
+  waypoints: makeWaypoints(B.routes, zones, { hidden: 'Ban công ẩn (Challenge C)', S1: 'S1 – ống gió (Impossible Jump)', S2: 'S2 – đường tắt cần cẩu', S3: 'S3 – mặt tháp', detour: 'Đường vòng hẻm' }),
 });
-fs.writeFileSync(new URL('../public/maps/map002.json', import.meta.url), JSON.stringify(data));
+fs.writeFileSync(new URL('../packs/map002/maps/map002.json', import.meta.url), JSON.stringify(data));
 fs.mkdirSync(new URL('./out/', import.meta.url), { recursive: true });
 fs.writeFileSync(new URL('./out/routes002.json', import.meta.url), JSON.stringify(B.routes));
 const hops = Object.fromEntries(Object.entries(B.routes).map(([k, v]) => [k, v.length]));

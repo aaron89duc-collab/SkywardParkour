@@ -21,6 +21,7 @@ export class Input {
   touchMoveX = 0;
   touchMoveY = 0;
   touchJumpHeld = false;
+  touchDropHeld = false;
   usingTouch = false;
   pointerLocked = false;
   enabled = false;
@@ -69,6 +70,9 @@ export class Input {
   }
 
   private onKey(e: KeyboardEvent, down: boolean) {
+    // typing in a text field (admin password) is not game input
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const k = e.code;
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) e.preventDefault();
     if (down) {
@@ -114,6 +118,8 @@ export class Input {
   releaseJump(at = performance.now()) { if (this.jumpDownAt >= 0) this.heldFor = Math.max(0, (at - this.jumpDownAt) / 1000); this.jumpDownAt = -1; }
   consumeHeldFor() { const v = this.heldFor; this.heldFor = null; return v; }
   pressDrop() { this.dropLatch = true; }
+  /** raw key state (admin fly controls) */
+  isDown(code: string) { return this.keys.has(code); }
   pressPause() { this.pauseLatch = true; }
 
   consumeJump() { const v = this.jumpLatch; this.jumpLatch = false; return v; }

@@ -1,0 +1,19 @@
+{
+ "id": "map001",
+ "name": "Starter Village",
+ "order": 1,
+ "yMin": -70,
+ "yMax": 141.5,
+ "entry": "maps/map001.json",
+ "minApp": 1,
+ "requires": [],
+ "summary": "Làng khởi đầu · 0 → 140 m · có sẵn trong app",
+ "bundled": true,
+ "root": "../../public",
+ "include": [
+  "maps/map001.json",
+  "assets/map001"
+ ],
+ "version": 2,
+ "contentHash": "a66e325f995fb445656c1eb1997318d38f7e4640a8505251ea18321c43449fd6"
+}
