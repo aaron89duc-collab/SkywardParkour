@@ -47,13 +47,18 @@ const { chromium } = require('playwright');
   };
   if (process.argv[2] !== 'islands') {
   // podium at (-9,140,-37), 6.4 wide: west face x=-12.2
-  await run('catch', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 1.2, shotAt: 1.1 }`);
+  // falling past an edge: caught only with intent (stick toward the wall), never by itself
+  await run('catch', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 1.2, camYaw: -Math.PI/2, input: (t, I) => { I.touchMoveY = t < 0.5 ? 1 : 0; }, shotAt: 1.1 }`);
+  await run('catch_nointent', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 1.2 }`);
   await run('fastfall_nocatch', `{ p: [-12.75, 147, -35.5], yaw: -Math.PI/2, t: 2.5 }`);
-  await run('shimmy', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 3.2, camYaw: Math.PI/2, input: (t, I) => { I.touchMoveX = t > 0.8 ? 1 : 0; }, shotAt: 1.6 }`);
-  await run('pushoff', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 2.0, camYaw: Math.PI/2, input: (t, I) => { if (t > 0.8) { I.touchMoveY = 1; } if (Math.abs(t - 0.9) < 0.01) { I.pressJump(); I.touchJumpHeld = true; } }, shotAt: 1.2 }`);
-  await run('climb', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 2.2, input: (t, I) => { if (Math.abs(t - 0.8) < 0.01) I.pressJump(); }, shotAt: 1.15 }`);
+  await run('shimmy', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, vel: [0.8, 0, 0], t: 3.2, camYaw: Math.PI/2, input: (t, I) => { I.touchMoveY = t > 0.26 && t < 0.5 ? -1 : 0; I.touchMoveX = t > 0.8 ? 1 : 0; }, shotAt: 1.6 }`);
+  await run('pushoff', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, vel: [0.8, 0, 0], t: 2.0, camYaw: Math.PI/2, input: (t, I) => { if (t > 0.8) { I.touchMoveY = 1; } if (Math.abs(t - 0.9) < 0.01) { I.pressJump(); I.touchJumpHeld = true; } }, shotAt: 1.2 }`);
+  await run('climb', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, vel: [0.8, 0, 0], t: 2.2, input: (t, I) => { if (Math.abs(t - 0.8) < 0.01) I.pressJump(); }, shotAt: 1.15 }`);
   await run('lower_button', `{ p: [-11.75, 140.05, -38], yaw: -Math.PI/2, t: 1.6, input: (t, I) => { if (Math.abs(t - 0.3) < 0.01) I.pressDrop(); }, shotAt: 0.75 }`);
+  // a misstep is a fall (tips over the edge first); pulling back in time saves it
   await run('walkoff_slow', `{ p: [-10.8, 140.05, -38], yaw: -Math.PI/2, t: 2.0, camYaw: Math.PI/2, input: (t, I) => { I.touchMoveY = 0.4; } }`);
+  await run('walkoff_reflex', `{ p: [-10.8, 140.05, -38], yaw: -Math.PI/2, t: 2.4, camYaw: Math.PI/2, input: function (t, I, P) { if (t > 0.1 && P.state === 'air' && this.off == null) this.off = t; I.touchMoveY = this.off == null ? 0.4 : t - this.off < 0.25 ? 0.4 : t - this.off < 0.6 ? -1 : 0; } }`);
+  await run('walkoff_reflex_late', `{ p: [-10.8, 140.05, -38], yaw: -Math.PI/2, t: 2.4, camYaw: Math.PI/2, input: function (t, I, P) { if (t > 0.1 && P.state === 'air' && this.off == null) this.off = t; I.touchMoveY = this.off == null ? 0.4 : t - this.off < 0.5 ? 0.4 : t - this.off < 0.9 ? -1 : 0; } }`);
   await run('runoff_roll', `{ p: [15, 6.9, 25.6], yaw: 0, t: 2.0, camYaw: Math.PI, input: (t, I) => { I.touchMoveY = 1; }, shotAt: 0.75 }`);
   await run('air_mantle', `{ p: [-13.3, 139.1, -38], yaw: Math.PI/2, vel: [3.5, 2.5, 0], t: 1.5, camYaw: -Math.PI/2, input: (t, I) => { I.touchMoveY = 1; }, shotAt: 0.3 }`);
   await run('vault', `{ p: [30, 0.05, 37], yaw: Math.PI, t: 2.0, camYaw: 0, prep: (g, P, I, V) => { g.physics.addBox(new V(30, 0.55, 31), new V(1.6, 0.55, 0.3)); g.physics.step(); }, input: (t, I) => { I.touchMoveY = 1; }, shotAt: 0.92 }`);

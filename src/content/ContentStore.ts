@@ -26,6 +26,10 @@ export interface InstalledPack {
 export interface RemoteMap extends Omit<InstalledPack, 'installedAt'> {
   minApp: number;
   bundled?: boolean;
+  /** protocol v2: sha256 of the map's pack manifest (files/<pack>); `files` stays empty until it is fetched */
+  pack?: string;
+  /** protocol v2: gameplay mechanics the map uses (the app must know all of them) */
+  mechanics?: string[];
 }
 
 export interface RemoteManifest {

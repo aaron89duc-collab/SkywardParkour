@@ -82,13 +82,54 @@ export class MapManager {
   entry(id: string) { return this.registry.find((e) => e.id === id) ?? null; }
   map(id: string) { return this.loaded.get(id)?.data ?? null; }
 
-  private async loadNow(entry: MapRegistryEntry) {
+  private loadNow(entry: MapRegistryEntry) {
+    return this.physics.ownedBy(entry.id, () => this.build(entry));
+  }
+
+  /**
+   * Take a map out of the world: its scene graph (GPU buffers freed), every collider it made, its effects and
+   * its gate. Its files stay on the device (and in the asset cache), so loading it again is quick and offline.
+   */
+  unload(id: string) {
+    const m = this.loaded.get(id);
+    if (!m) return false;
+    this.loaded.delete(id);
+    this.loading.delete(id);
+    this.root.remove(m.group);
+    m.group.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh || (o as THREE.InstancedMesh).isInstancedMesh) {
+        mesh.geometry?.dispose();
+        (o as THREE.InstancedMesh).dispose?.();
+      }
+    });
+    this.physics.removeOwned(id);
+    this.fx.removeScope(id);
+    this.ladderList = [...this.loaded.values()].flatMap((x) => x.boosters.ladders);
+    this.onUnloaded?.(id);
+    return true;
+  }
+  /** called when a map has been taken out of the world */
+  onUnloaded: ((id: string) => void) | null = null;
+
+  /**
+   * Streaming: keep only the maps whose registry index is in [lo, hi] (the map being played and its
+   * neighbours). Returns the ids that were unloaded. Loading the ones that are missing is the caller's job.
+   */
+  retain(lo: number, hi: number) {
+    const out: string[] = [];
+    this.registry.forEach((e, i) => { if ((i < lo || i > hi) && this.loaded.has(e.id) && this.unload(e.id)) out.push(e.id); });
+    return out;
+  }
+
+  private async build(entry: MapRegistryEntry) {
     const data = await this.assets.json<MapData>(entry.file);
     const group = new THREE.Group();
     group.name = entry.id;
 
     if (!this.atlasTex) {
-      const [tex, rects] = await Promise.all([this.assets.texture('assets/sprites/map001_atlas.webp'), this.assets.json<Record<string, AtlasRect>>('assets/sprites/map001_atlas.json')]);
+      const atlas = data.atlas ?? 'assets/sprites/map001_atlas';
+      const [tex, rects] = await Promise.all([this.assets.texture(`${atlas}.webp`), this.assets.json<Record<string, AtlasRect>>(`${atlas}.json`)]);
       this.atlasTex = tex;
       this.atlasRects = rects;
     }
@@ -118,7 +159,8 @@ export class MapManager {
       group.add(sprites.build(data.sprites));
     }
 
-    // effects bound to prefabs
+    // effects bound to prefabs (recorded per map: they go when the map is unloaded)
+    this.fx.beginScope(entry.id);
     // sky waterfalls fall all the way down to the village and feed a pond (or fade into the cloud sea)
     prefabs.instancesOf('waterfall_island').forEach((m) => {
       const base = new THREE.Vector3().setFromMatrixPosition(m);
@@ -138,12 +180,13 @@ export class MapManager {
     }
 
     for (const f of data.fx) if (f.t === 'portal') this.fx.addPortal(new THREE.Vector3(...f.p), f.s, f.r);
+    this.fx.endScope();
 
     const movers = new MoverSystem(this.physics);
-    await movers.build(data.movers ?? [], this.assets);
+    await movers.build(data.movers ?? [], this.assets, data.moverModels);
     group.add(movers.group);
     const boosters = new BoosterSystem(this.physics);
-    await boosters.build(data.pads, data.rings, data.ladders, this.assets);
+    await boosters.build(data.pads, data.rings, data.ladders, this.assets, data.padModel);
     group.add(boosters.group);
 
     this.root.add(group);

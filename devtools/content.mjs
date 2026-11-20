@@ -1,6 +1,16 @@
 // Map content packs -> downloadable content (Cloudflare R2 or any static host).
 //
-//   node devtools/content.mjs build                 packs/*  ->  content-dist/{manifest.json, files/<sha256>}
+// Content protocol v2 (web app now, Android app later; see docs/CONTENT_PROTOCOL.md):
+//   catalog.json            every map in one small list (no file lists): id, name, order, heights, version, minApp,
+//                           size, `pack` = sha256 of the map's pack manifest. Short cache: the only file that changes.
+//   files/<sha256>          immutable, content addressed: every asset AND every pack manifest
+//                           ({schema: 2, id, version, hash, entry, files: {logical path: [sha256, size]}}).
+//   manifest.json           protocol v1 (all maps with their file lists) for app builds released before v2.
+// Packs are self-contained: a map's pack lists every downloadable file its map JSON uses, even files that live in
+// another pack's folder (same hash = stored once on R2 and on the device), so any map can be installed, played and
+// removed on its own - the number of maps is not limited by the app or by the device.
+//
+//   node devtools/content.mjs build                 packs/*  ->  content-dist/{catalog.json, manifest.json, files/<sha256>}
 //   node devtools/content.mjs publish --bucket B [--url https://maps.example.com/] [--dry-run]
 //                                                   upload new files first, manifest.json last (wrangler, `wrangler login` once)
 //   node devtools/content.mjs cors --bucket B       allow the game (any origin) to GET from the bucket
@@ -51,7 +61,7 @@ export function scanPacks(cache = null) {
       if (!fs.existsSync(p)) throw new Error(`${id}: include "${inc}" not found`);
       if (fs.statSync(p).isDirectory()) walk(p, root, rel); else rel.push(inc);
     }
-    rel = [...new Set(rel)].filter((r) => r !== 'pack.json').sort();
+    rel = [...new Set(rel)].filter((r) => r !== 'pack.json' && !r.endsWith('.info.json')).sort(); // .info.json: build tools only
     if (!rel.includes(meta.entry)) throw new Error(`${id}: entry ${meta.entry} is not in the pack`);
     const files = {};
     let size = 0;
@@ -63,10 +73,83 @@ export function scanPacks(cache = null) {
       files[r] = { abs, hash: c.h, size: st.size };
       size += st.size;
     }
-    const hash = sha(rel.map((r) => `${r}:${files[r].hash}`).join('\n'));
-    packs.push({ id, dir, pf, meta, files, hash, size });
+    packs.push({ id, dir, pf, meta, files, size, root });
+  }
+  // self-contained packs: add the files a map uses from other (downloadable) packs
+  const owner = new Map();
+  for (const p of packs) if (!p.meta.bundled) for (const [r, f] of Object.entries(p.files)) if (!owner.has(r)) owner.set(r, f);
+  for (const p of packs) {
+    if (p.meta.bundled) continue;
+    let data;
+    try { data = JSON.parse(fs.readFileSync(path.join(p.root, p.meta.entry), 'utf8')); } catch { continue; }
+    for (const ref of referencedFiles(data)) {
+      if (p.files[ref]) continue;
+      const f = owner.get(ref);
+      if (f) { p.files[ref] = f; p.size += f.size; }
+    }
+  }
+  for (const p of packs) {
+    const rel = Object.keys(p.files).sort();
+    p.files = Object.fromEntries(rel.map((r) => [r, p.files[r]]));
+    p.hash = sha(rel.map((r) => `${r}:${p.files[r].hash}`).join('\n'));
   }
   return packs;
+}
+
+/** default models of the engine's moving-platform looks and jump pads (keep in step with src/world/Movers.ts, Boosters.ts) */
+const MOVER_MODELS = {
+  hover: 'assets/map002/hover_platform', pallet: 'assets/map003/cargo_pallet_stand', lift: 'assets/map003/lift_car',
+  trolley: 'assets/map003/trolley_car', swing: 'assets/map003/hanging_container', rotor: 'assets/map003/crane_jib',
+};
+const PAD_MODEL = 'assets/map002/jump_pad';
+
+/** Logical paths of the downloadable files a map JSON uses (models, collision meshes, atlas). */
+export function referencedFiles(d) {
+  const bases = new Set();
+  for (const b of Object.values(d.prefabFiles ?? {})) bases.add(b);
+  for (const m of d.movers ?? []) {
+    const look = m.kind === 'swing' ? 'swing' : m.kind === 'rotor' ? 'rotor' : m.kind === 'hover' ? m.look ?? 'hover' : null;
+    if (look) bases.add(d.moverModels?.[look] ?? MOVER_MODELS[look]);
+  }
+  if ((d.pads ?? []).some((p) => p.t === 'jump')) bases.add(d.padModel?.file ?? PAD_MODEL);
+  if (d.atlas) bases.add(d.atlas);
+  const out = new Set();
+  for (const b of bases) for (const ext of ['.glb', '.col.bin', '.webp', '.json']) out.add(b + ext);
+  return out;
+}
+
+/** Gameplay mechanics a map uses (the app must implement all of them: src/content/ContentManager.ts MECHANICS). */
+export function mechanicsOf(d) {
+  const m = new Set();
+  if ((d.ladders ?? []).length) m.add('ladder');
+  for (const p of d.pads ?? []) m.add(p.t === 'speed' ? 'speed-pad' : 'jump-pad');
+  if ((d.rings ?? []).length) m.add('speed-ring');
+  for (const mv of d.movers ?? []) m.add(`mover:${mv.kind}`);
+  return [...m].sort();
+}
+function entryData(p) { try { return JSON.parse(fs.readFileSync(path.join(p.root, p.meta.entry), 'utf8')); } catch { return {}; } }
+
+/** The pack manifest of one map (stored content addressed: files/<sha256 of this JSON>). */
+export function packManifestOf(p) {
+  const json = JSON.stringify({
+    schema: 2, id: p.id, version: p.meta.version, hash: p.hash, entry: p.meta.entry,
+    files: Object.fromEntries(Object.entries(p.files).map(([r, f]) => [r, [f.hash, f.size]])),
+  });
+  return { json, sha: sha(Buffer.from(json)) };
+}
+
+/** catalog.json (protocol v2): the list of maps, without file lists. */
+export function catalogOf(packs) {
+  return {
+    schema: 2,
+    generated: new Date().toISOString(),
+    maps: packs.map((p) => ({
+      id: p.id, name: p.meta.name, order: p.meta.order, yMin: p.meta.yMin, yMax: p.meta.yMax,
+      entry: p.meta.entry, minApp: p.meta.minApp ?? 1, requires: p.meta.requires ?? [], summary: p.meta.summary ?? '',
+      bundled: !!p.meta.bundled, version: p.meta.version, hash: p.hash, size: p.size, files: Object.keys(p.files).length,
+      pack: packManifestOf(p).sha, mechanics: mechanicsOf(entryData(p)),
+    })),
+  };
 }
 
 /** Manifest JSON for the given packs (versions as currently recorded). */
@@ -101,8 +184,11 @@ export function build() {
   }
   const manifest = manifestOf(packs);
   fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(manifest));
-  // drop files no pack references any more (local build dir only; R2 keeps old files for clients mid-update)
   const live = new Set(manifest.maps.flatMap((m) => Object.values(m.files).map((f) => f[0])));
+  for (const p of packs) { const pm = packManifestOf(p); fs.writeFileSync(path.join(OUT, 'files', pm.sha), pm.json); live.add(pm.sha); }
+  const catalog = catalogOf(packs);
+  fs.writeFileSync(path.join(OUT, 'catalog.json'), JSON.stringify(catalog));
+  // drop files no pack references any more (local build dir only; R2 keeps old files for clients mid-update)
   for (const f of fs.readdirSync(path.join(OUT, 'files'))) if (!live.has(f)) fs.rmSync(path.join(OUT, 'files', f));
   // bundled packs: the app's own index records which version it ships
   const idxFile = path.join(ROOT, 'public/maps/index.json');
@@ -135,12 +221,22 @@ async function publish() {
   const recFile = path.join(OUT, `.uploaded-${bucket}.json`);
   if (fs.existsSync(recFile)) for (const h of JSON.parse(fs.readFileSync(recFile, 'utf8'))) have.add(h);
   if (url) {
+    const base = url.endsWith('/') ? url : url + '/';
     try {
-      const r = await fetch(new URL('manifest.json', url.endsWith('/') ? url : url + '/'), { cache: 'no-store' });
+      const r = await fetch(new URL('manifest.json', base), { cache: 'no-store' });
       if (r.ok) for (const m of (await r.json()).maps ?? []) for (const f of Object.values(m.files)) have.add(f[0]);
     } catch (e) { console.warn('could not read the live manifest:', e.message); }
+    try {
+      const r = await fetch(new URL('catalog.json', base), { cache: 'no-store' });
+      if (r.ok) for (const m of (await r.json()).maps ?? []) {
+        const pr = await fetch(new URL('files/' + m.pack, base));
+        if (!pr.ok) continue;
+        have.add(m.pack);
+        for (const f of Object.values((await pr.json()).files ?? {})) have.add(f[0]);
+      }
+    } catch (e) { console.warn('could not read the live catalog:', e.message); }
   }
-  const all = [...new Set(manifest.maps.flatMap((m) => Object.values(m.files).map((f) => f[0])))];
+  const all = [...new Set([...manifest.maps.flatMap((m) => Object.values(m.files).map((f) => f[0])), ...scanPacks().map((p) => packManifestOf(p).sha)])];
   const todo = all.filter((h) => !have.has(h));
   console.log(`${todo.length} new file(s) to upload, ${all.length - todo.length} already on R2`);
   let n = 0;
@@ -154,10 +250,12 @@ async function publish() {
       fs.writeFileSync(recFile, JSON.stringify([...have]));
     }
   }
-  // the manifest goes last: a client never sees a manifest that points at files not uploaded yet
-  console.log('manifest.json');
-  if (!dry) wrangler(['r2', 'object', 'put', `${bucket}/manifest.json`, '--file', path.join(OUT, 'manifest.json'), '--remote',
-    '--content-type', 'application/json', '--cache-control', 'public, max-age=60, must-revalidate']);
+  // the lists go last: a client never sees a list that points at files not uploaded yet
+  for (const f of ['manifest.json', 'catalog.json']) {
+    console.log(f);
+    if (!dry) wrangler(['r2', 'object', 'put', `${bucket}/${f}`, '--file', path.join(OUT, f), '--remote',
+      '--content-type', 'application/json', '--cache-control', 'public, max-age=60, must-revalidate']);
+  }
   console.log(dry ? 'dry run: nothing uploaded' : 'published');
 }
 

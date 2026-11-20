@@ -48,17 +48,46 @@ export interface PrefabData {
   tag?: string;
 }
 
-/** Moving platform (Rapier kinematic body) following a ping-pong path through `pts` (platform top-centres). */
+/**
+ * Moving platform, stepped deterministically from the simulation time (parentless colliders moved every tick).
+ *  - crane / hover: ping-pong along `pts` (platform top-centres) with `wait` seconds parked at each end
+ *  - swing: a container hanging from `pivot` on a cable of length `len`, swinging `amp` degrees either side in the
+ *    vertical plane facing yaw `r`, period `period`; it stays level (spreader on parallel cables). pts[0] / pts[1] =
+ *    its roof centre at the two extremes (filled in by the map builder)
+ *  - rotor: a crane jib turning about the vertical axis through `center` (walkway top at center.y) between yaw
+ *    angles a0 and a1 (degrees) with `wait` at each end, `speed` in degrees per second; pts = the jib tip at a0 / a1
+ */
 export interface MoverData {
   id: string;
-  kind: 'crane' | 'hover';
+  kind: 'crane' | 'hover' | 'swing' | 'rotor';
   pts: V3[];
-  speed: number; // m/s along the path
+  speed: number; // m/s along the path (rotor: degrees per second)
   wait: number; // seconds parked at each end
   phase?: number; // seconds offset in the cycle
-  r?: number; // yaw degrees of the platform
-  s?: number; // model scale (hover) / pallet size (crane)
-  jib?: number; // crane: height of the trolley rail
+  r?: number; // yaw degrees of the platform (swing: of the swing plane)
+  s?: number; // model scale (hover / swing) / pallet size (crane)
+  jib?: number; // crane: height of the trolley rail; hover 'lift': height of the hoist rope's top
+  /**
+   * Fully data-driven look (any kind): a GLB plus its solid parts, so a new map can bring a new moving object
+   * with no app update. Units are the model's normalised units (height 1) times `s`; offsets are relative to the
+   * mover's reference point (deck top centre; rotor: the axis at walkway height), before the mover's yaw.
+   */
+  model?: { file: string; s?: number; off?: V3; yaw?: number; boxes: [number, number, number, number, number, number][] };
+  /** hover only: what it looks like: hover platform (default), a cargo pallet stand, a lift car (on a lift tower),
+   * a trolley platform hanging from an overhead rail (moves along the model's x axis, boarded from its open -z side) */
+  look?: 'hover' | 'pallet' | 'lift' | 'trolley';
+  // swing
+  pivot?: V3;
+  len?: number;
+  amp?: number;
+  period?: number;
+  // rotor
+  center?: V3;
+  arm?: number; // rotor: distance of the reference stand point from the axis (along the jib)
+  off?: number; // rotor: sideways offset of the walkway centre line from the axis
+  width?: number;
+  a0?: number;
+  a1?: number;
 }
 
 /** jump pad: launches upward; speed pad: dash in the arrow direction (local +Z). p = top-centre of the pad surface. */
@@ -134,6 +163,13 @@ export interface MapData {
   ladders?: LadderData[];
   /** admin / test teleport targets (feet positions on standable route points) */
   waypoints?: { label: string; p: V3 }[];
+  /** the map's own jump-pad model (default: Map 002's): file without .glb, normalised w x d, pad surface height */
+  padModel?: { file: string; w: number; d: number; top: number };
+  /** sprite atlas (logical path without extension); default: Map 001's */
+  atlas?: string;
+  /** models of the moving-platform looks this map uses (logical paths without .glb), overriding the engine's
+   *  defaults: a later map can bring its own trolley / lift car / container / jib model without an app update */
+  moverModels?: Partial<Record<'hover' | 'pallet' | 'lift' | 'trolley' | 'swing' | 'rotor', string>>;
   /** horizontal region of this map (for "which map am I in") */
   region?: { c: [number, number]; r: number };
 }

@@ -64,11 +64,16 @@ Thông số điều khiển (dùng chung PC & điện thoại, mô phỏng bư�
 | Snap xuống nền | chỉ bật khi đang đi trên nền, tắt hẳn trong pha nhảy |
 | Smart ledge grab | tia ngang ở ngực → tia từ trên xuống tìm mặt trên → kiểm tra độ cao, độ dốc, chỗ treo & chỗ đứng trống → hỗ trợ ±0,2 m sang ngang (theo hướng cần, khi đang lên/đỉnh quỹ đạo) và 0,2 m theo chiều cao ở đỉnh quỹ đạo; không bám tường cạnh chỗ sắp đáp; IK tay chỉ chỉnh hình ảnh sau khi vật lý đã xác nhận mép |
 
-- **Bắt mép khi rơi**: rơi ngang qua mép bệ/đảo với tốc độ < 17 m/s (rơi khoảng dưới 3,5 m) thì tự bám, kể cả mép ở bên cạnh hay phía sau. Rơi nhanh hơn thì không bám được. Không bám khi đang đẩy cần ra xa tường hoặc đang bay khỏi tường đó.
+- **Bắt mép khi rơi cần chủ ý**: chỉ bám khi đang lao tới hoặc đẩy cần về phía tường đó, và rơi chưa quá 15 m/s (khoảng 2,7 m).
+  Rơi ngang qua mép mà không hướng vào tường thì rơi luôn (không còn tự bám mép bên cạnh / phía sau).
 - **Nhảy hụt một chút → đu lên (mantle)**: chân thấp hơn mép 0,3–1,25 m khi lao vào tường thì tự kéo người lên.
 - **Treo**: đung đưa theo quán tính khi bắt mép lúc rơi, hai tay đặt đúng mép (IK). Leo lên 2 pha (kéo người → bước lên).
 - **Di chuyển ngang khi treo** (từng nhịp tay ~1 m, tự dừng khi mép hết).
-- **Tụt xuống bám mép**: bấm THẢ/E khi đứng gần mép, hoặc đi chậm ra khỏi mép → nhân vật quay lại và hạ người xuống treo.
+- **Tụt xuống bám mép**: chỉ bằng nút THẢ/E khi đứng sát mép (có chủ ý).
+- **Lỡ bước khỏi mép = rơi**, nhưng cứu được bằng phản xạ: đi bộ ra khỏi mép thì người chới với một nhịp (0,22 s trọng lực nhẹ),
+  kéo cần ngược lại trong 0,4 s → còn cao thì đu ngược lên, đã tụt thì bám lại mép (tối đa 2,3 m dưới mép). Không phản xạ thì rơi.
+  Đo bằng `devtools/misstep.cjs` (bước hụt ngẫu nhiên quanh các điểm của 2 map): không phản xạ – bản cũ tự cứu ~60%, nay ~20–30%;
+  kéo lại sau 0,18–0,25 s – đi bộ ~86–91%, chạy ~68%; kéo sau 0,32 s – chạy ~13%. Hai lần đầu rơi vì lỡ bước có mẹo hướng dẫn.
 - **Đạp tường bật ra sau** khi đang treo.
 - **Lộn nhào khi tiếp đất**: rơi 3–24 m mà vẫn đang chạy và phía trước còn chỗ → lộn một vòng rồi chạy tiếp; tự phanh nếu sắp lăn ra khỏi mép.
 - **Vượt rào**: chạy nhanh vào chướng ngại cao 0,45–1,3 m và mỏng → vault qua; chướng ngại dày → đẩy vào một chút là đu lên.

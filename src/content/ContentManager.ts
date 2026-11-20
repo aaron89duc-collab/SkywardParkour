@@ -16,14 +16,26 @@ import type { MapRegistryEntry } from '../world/MapTypes';
  *    version untouched (and resumes next time).
  *  - Maps a newer app is needed for (minApp > APP_CONTENT_VERSION) are listed but not offered.
  *
+ * Protocol v2 (any number of maps): the server keeps catalog.json (every map, no file lists) and one immutable
+ * pack manifest per map version (files/<sha256>), fetched only when that map is downloaded. A map can also need
+ * gameplay mechanics this build does not have yet (`mechanics`): it is listed but waits for an app update.
+ * The device keeps only the maps around the player (prune), so storage does not grow with the number of maps.
+ *
  * The game keeps using the same logical paths (maps/map002.json, assets/map002/x.glb): installed packs are
  * mounted under them and served from storage as blob: URLs.
  */
-export const APP_CONTENT_VERSION = 1;
+export const APP_CONTENT_VERSION = 2; // 2: swinging / turning movers, map pad models, multi-height rings (Map 003)
 
 const BASE = import.meta.env.BASE_URL;
 const ENV_URL = (import.meta.env.VITE_CONTENT_URL as string | undefined)?.trim();
 export const CONTENT_URL = ENV_URL ? (ENV_URL.endsWith('/') ? ENV_URL : ENV_URL + '/') : BASE + 'content/';
+
+/** Gameplay mechanics this build implements (map data may only use these; see docs/MECHANICS.md). */
+export const MECHANICS = new Set([
+  'ladder', 'jump-pad', 'speed-pad', 'speed-ring', 'ledge',
+  'mover:crane', 'mover:hover', 'mover:swing', 'mover:rotor',
+]);
+export const supports = (m: { minApp?: number; mechanics?: string[] }) => (m.minApp ?? 1) <= APP_CONTENT_VERSION && (m.mechanics ?? []).every((x) => MECHANICS.has(x));
 
 export type BundledEntry = MapRegistryEntry & { order: number; bundled: true; version?: number; hash?: string; summary?: string };
 
@@ -120,8 +132,9 @@ export class ContentManager {
     return u;
   };
 
-  /** Maps playable right now, bottom to top. A map is only offered if every map below it is there too
-   *  (the world is one continuous column: nothing may float above a hole). */
+  /** Maps playable right now, bottom to top. A map is playable when it is on the device together with the maps
+   *  it names in `requires` (only maps whose falls end in the map below need one; later maps are self-contained,
+   *  so any of them can be installed, played or pruned on its own). */
   entries(): MapRegistryEntry[] {
     const all: (MapRegistryEntry & { order: number; requires: string[] })[] = [];
     const ids = new Set([...this.bundled.map((b) => b.id), ...Object.keys(this.state.packs)]);
@@ -137,7 +150,7 @@ export class ContentManager {
     for (const e of all) {
       if (e.requires.every((r) => ok.has(r))) { ok.add(e.id); out.push({ id: e.id, name: e.name, file: e.file, yMin: e.yMin, yMax: e.yMax, order: e.order }); }
     }
-    return out;
+    return out; // (requires are checked against maps lower in the order: a dependency must sit below)
   }
 
   /** a loaded map keeps its files for this session (an update installed meanwhile applies on next start) */
@@ -162,10 +175,23 @@ export class ContentManager {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
-      const r = await fetch(CONTENT_URL + 'manifest.json', { cache: 'no-store', signal: ctl.signal });
-      if (!r.ok) throw new Error(`manifest ${r.status}`);
-      const m = (await r.json()) as RemoteManifest;
-      if (!m || m.schema !== 1 || !Array.isArray(m.maps)) throw new Error('bad manifest');
+      let m: RemoteManifest | null = null;
+      const c = await fetch(CONTENT_URL + 'catalog.json', { cache: 'no-store', signal: ctl.signal }).catch(() => null);
+      if (c?.ok) {
+        const cat = (await c.json()) as RemoteManifest;
+        if (cat && cat.schema === 2 && Array.isArray(cat.maps)) {
+          // keep the file lists already fetched for the same pack manifest
+          const old = new Map((this.state.manifest?.maps ?? []).map((x) => [x.id, x]));
+          cat.maps = cat.maps.map((x) => { const o = old.get(x.id); return { ...x, files: o && o.pack === x.pack && Object.keys(o.files ?? {}).length ? o.files : {} }; });
+          m = cat;
+        }
+      }
+      if (!m) {
+        const r = await fetch(CONTENT_URL + 'manifest.json', { cache: 'no-store', signal: ctl.signal });
+        if (!r.ok) throw new Error(`manifest ${r.status}`);
+        m = (await r.json()) as RemoteManifest;
+        if (!m || m.schema !== 1 || !Array.isArray(m.maps)) throw new Error('bad manifest');
+      }
       this.online = true;
       this.state.manifest = m;
       this.state.manifestAt = Date.now();
@@ -189,6 +215,7 @@ export class ContentManager {
   }
 
   private missingBytes(r: RemoteMap) {
+    if (!Object.keys(r.files ?? {}).length) return r.size; // v2 catalog entry: exact delta known once its pack manifest is read
     let n = 0;
     const seen = new Set<string>();
     for (const [h, size] of Object.values(r.files)) if (!this.present.has(h) && !seen.has(h)) { seen.add(h); n += size; }
@@ -210,7 +237,7 @@ export class ContentManager {
       const order = r?.order ?? (s?.kind === 'bundled' ? s.b.order : s?.p.order) ?? 99;
       const yMin = r?.yMin ?? (s?.kind === 'bundled' ? s.b.yMin : s?.p.yMin) ?? 0;
       let state: MapStatus['state'] = 'ready';
-      if (r && r.minApp > APP_CONTENT_VERSION) state = s ? 'ready' : 'needs-app';
+      if (r && !supports(r)) state = s ? 'ready' : 'needs-app';
       else if (!s) state = 'download';
       else if (r && r.hash !== hash && r.version >= (version ?? 0)) state = 'update';
       if (s && !playable.has(id)) state = 'needs-previous';
@@ -244,7 +271,8 @@ export class ContentManager {
   private async installNow(id: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
     const r = this.state.manifest?.maps.find((x) => x.id === id);
     if (!r) throw new Error('Không tìm thấy map trên máy chủ');
-    if (r.minApp > APP_CONTENT_VERSION) throw new Error('Cần cập nhật ứng dụng để chơi map này');
+    if (!supports(r)) throw new Error('Cần cập nhật ứng dụng để chơi map này');
+    if (r.pack && !Object.keys(r.files ?? {}).length) r.files = await this.packFiles(r, signal);
     // already up to date (queued twice, or installed meanwhile)
     const have = this.source(id);
     if (have && (have.kind === 'bundled' ? have.b.hash : have.p.hash) === r.hash) return;
@@ -313,6 +341,46 @@ export class ContentManager {
       this.installing = null;
       this.emit();
     }
+  }
+
+  /** Protocol v2: read one map's pack manifest (content addressed: verified against its name). */
+  private async packFiles(r: RemoteMap, signal?: AbortSignal): Promise<Record<string, [string, number]>> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await fetch(CONTENT_URL + 'files/' + r.pack, { signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = await res.arrayBuffer();
+        if ((await sha256Async(buf)) !== r.pack) throw new Error('mã kiểm tra sai');
+        const pm = JSON.parse(new TextDecoder().decode(buf)) as { id: string; hash: string; files: Record<string, [string, number]> };
+        if (pm.id !== r.id || pm.hash !== r.hash) throw new Error('pack manifest không khớp');
+        const st = this.state.manifest?.maps.find((x) => x.id === r.id);
+        if (st) { st.files = pm.files; await this.store.setState(this.state).catch(() => {}); }
+        return pm.files;
+      } catch (e) {
+        if (signal?.aborted || attempt >= 3) throw e;
+        await sleep(600 * attempt);
+      }
+    }
+  }
+
+  /**
+   * Keep storage bounded however many maps exist: downloaded maps outside `keep` are removed once more than
+   * `max` are on the device (farthest from the player first). They come back by themselves when needed.
+   */
+  async prune(keep: Set<string>, distance: (id: string) => number, max = 10) {
+    const installed = Object.keys(this.state.packs).filter((id) => !this.pinned.has(id) && !keep.has(id));
+    let over = Object.keys(this.state.packs).length - max;
+    if (over <= 0) return [];
+    const gone: string[] = [];
+    for (const id of installed.sort((a, b) => distance(b) - distance(a))) {
+      if (over-- <= 0) break;
+      // never break a kept map's dependency
+      const needed = [...keep].some((k) => this.state.packs[k]?.requires?.includes(id));
+      if (needed) continue;
+      await this.remove(id);
+      gone.push(id);
+    }
+    return gone;
   }
 
   /** Remove a downloaded map (frees space; bundled maps cannot be removed). */

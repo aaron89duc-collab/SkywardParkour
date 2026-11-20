@@ -46,7 +46,14 @@ export const PHYS = {
     lowerTime: 0.75, // climbing down from a top into a hang
     maxUpVelocity: 7.0,
     assist: 0.2, // smart grab: ledge up to this much above reach at the apex, or this far to the side, still catches
-    catchMaxFallSpeed: 17, // falling slower than this past an edge -> auto catch
+    // missteps: walking over an edge is a fall, not an automatic hang. A quick pull back toward the edge saves it.
+    reflexWindow: 0.4, // seconds after leaving an edge (no jump) during which pulling the stick back grabs it
+    reflexMaxDrop: 2.3, // ...as long as the feet are at most this far below the edge (hands still reach it)
+    reflexMantleBelow: 0.8, // ...pulled back this early: straight back up onto the edge instead of hanging
+    slipTime: 0.22, // walking (not running) over an edge: the body tips over first, gravity x slipGravity
+    slipGravity: 0.5,
+    slipMaxSpeed: 3.8,
+    catchMaxFallSpeed: 15, // falling faster than this (about 2.7 m of free fall) -> hands cannot hold on
     mantleMinRel: 0.3, // ledge just above the feet while airborne -> pull up instead of falling
     mantleMaxRel: 1.25,
     shimmyCycle: 1.25, // seconds per hand-over-hand step

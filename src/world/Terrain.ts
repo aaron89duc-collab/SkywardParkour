@@ -84,7 +84,12 @@ function buildCityDeck(data: TerrainData, physics: Physics, footprints: Footprin
 
 /** The floating plateau the Starter Village is built on: grass, cobble paths, rock underside, colliders. */
 export function buildTerrain(data: TerrainData, physics: Physics, footprints: Footprint[] = []): THREE.Group {
-  if (data.style === 'none') { const g = new THREE.Group(); g.name = 'terrain'; return g; }
+  if (data.style === 'none') {
+    const g = new THREE.Group(); g.name = 'terrain';
+    // no ground, but an invisible ring wall may keep the climb inside the map (maps stacked above the village's wall)
+    if (data.radius > 0 && data.wallTop) { const c = data.center ?? [0, 0, 0]; boundaryRing(physics, c[0], c[1], c[2], data.radius, data.wallTop, data.gaps); }
+    return g;
+  }
   if (data.style === 'city') return buildCityDeck(data, physics, footprints);
   const R = data.radius;
   const group = new THREE.Group();

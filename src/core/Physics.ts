@@ -16,10 +16,45 @@ export class Physics {
     await RAPIER.init();
   }
 
+  /** colliders created while an owner (a map id) is active: removed together when that map is unloaded */
+  private owner: string | null = null;
+  private owned = new Map<string, RAPIER.Collider[]>();
+
   constructor() {
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
     this.ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
     this.ball = new RAPIER.Ball(0.25);
+    // every collider made while an owner is set belongs to it (whichever system creates it)
+    const create = this.world.createCollider.bind(this.world);
+    this.world.createCollider = ((desc: RAPIER.ColliderDesc, parent?: RAPIER.RigidBody) => {
+      const c = create(desc, parent);
+      if (this.owner) { let l = this.owned.get(this.owner); if (!l) this.owned.set(this.owner, (l = [])); l.push(c); }
+      return c;
+    }) as typeof this.world.createCollider;
+  }
+
+  /** Run `f` with every collider it creates (also after awaits inside it) recorded under `owner`. */
+  async ownedBy<T>(owner: string, f: () => Promise<T>): Promise<T> {
+    const prev = this.owner;
+    this.owner = owner;
+    try { return await f(); } finally { this.owner = prev; }
+  }
+
+  /** Make colliders that belong to no map (gates, the player) even while a map is loading. */
+  unowned<T>(f: () => T): T {
+    const prev = this.owner;
+    this.owner = null;
+    try { return f(); } finally { this.owner = prev; }
+  }
+
+  /** Remove every collider an owner made. */
+  removeOwned(owner: string) {
+    const l = this.owned.get(owner);
+    if (!l) return 0;
+    for (const c of l) { try { this.world.removeCollider(c, false); this.colliderCount--; } catch { /* already gone */ } }
+    this.owned.delete(owner);
+    this.world.updateSceneQueries();
+    return l.length;
   }
 
   step() {

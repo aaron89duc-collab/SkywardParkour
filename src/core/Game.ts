@@ -77,6 +77,7 @@ export class Game {
   content = new ContentManager();
   autoSync!: AutoSync;
   private syncKind: SyncView['kind'] = 'idle';
+  private slipAt = -99;
   lb!: Leaderboard;
   private lbTimer = 30;
   /** Adventure (continue from conquered maps) or Challenge (always from 0 m, records + achievements only) */
@@ -219,22 +220,33 @@ export class Game {
 
   private otherMaps: Promise<void> | null = null;
   private devPacks: Promise<void> | null = null;
-  /** Load every playable map that is not in the world yet (after startup, after a download). Chained: safe to
-   *  call any time; maps below are never unloaded, so a fall always lands on real geometry. */
-  loadOtherMaps() {
+  /**
+   * Map streaming: the world holds only the map being played, the two below it (the way back down, the view)
+   * and the next one above (its gate opens once it is in the world). Any number of maps can exist: the rest stay
+   * on the device (or on the server) until the player gets near them. Chained: safe to call any time (after
+   * startup, after a download, whenever the player enters another map).
+   */
+  static readonly STREAM_BELOW = 2;
+  static readonly STREAM_ABOVE = 1;
+  loadOtherMaps(centerId?: string) {
     this.otherMaps = (this.otherMaps ?? Promise.resolve()).then(async () => {
       if (this.devPacks) await this.devPacks;
       this.maps.setRegistry(this.content.entries());
+      const reg = this.maps.registry;
+      let c = reg.findIndex((e) => e.id === (centerId ?? this.map?.id));
+      if (c < 0) c = 0;
+      const lo = Math.max(0, c - Game.STREAM_BELOW), hi = Math.min(reg.length - 1, c + Game.STREAM_ABOVE);
+      const gone = this.maps.retain(lo, hi);
       let added = false;
-      for (const e of this.maps.registry) {
+      for (const e of reg.slice(lo, hi + 1)) {
         if (this.maps.map(e.id)) continue;
         try { await this.maps.load(e); added = true; } catch (err) { console.warn('map load failed', e.id, err); }
       }
       if (added) {
         this.maps.setLodDistance(QUALITY_PRESETS[this.quality].lodDistance);
         this.renderer.compile(this.scene, this.cam.camera);
-        this.admin?.mapsChanged();
       }
+      if (added || gone.length) this.admin?.mapsChanged();
       this.syncGates();
     });
     return this.otherMaps;
@@ -480,7 +492,7 @@ export class Game {
     this.ui.hideMenu();
     if (!this.maps.map(mapId)) {
       this.ui.showLoading(`Đang dựng ${this.maps.entry(mapId)?.name ?? 'bản đồ'}…`);
-      await this.loadOtherMaps();
+      await this.loadOtherMaps(mapId);
       this.ui.hideLoading();
     }
     const m = this.maps.map(mapId) ?? this.maps.map(this.firstMapId)!;
@@ -767,6 +779,7 @@ export class Game {
       this.map = here;
       this.setHudMap(here);
       this.autoSync.kick(1500); // the window of maps kept ahead moves with the player
+      void this.loadOtherMaps(); // ... and so does the window of maps in the world
       if (fellBack) this.ui.toast(`Rơi xuống ${here.name}`, `Kỷ lục lượt này vẫn giữ: ${Math.floor(this.score.runMax)} m — leo lại thôi!`, false, 3600);
       else if (here.id !== this.firstMapId) this.ui.toast(here.name, `Map ${here.id.slice(3)} · ${here.origin[1]}–${here.origin[1] + here.height} m`, true, 3200);
     }
@@ -860,7 +873,18 @@ export class Game {
         this.audio.jump();
         this.fx.dust.emit(feet, 5, { speed: 1.5, up: 0.3, life: 0.5, size: 0.45 });
         break;
+      case 'slip': this.slipAt = this.time; this.haptic(8); break;
       case 'land': {
+        // first real falls after a misstep: teach the reflex save (and the deliberate way down)
+        if (e.drop > 2.5 && this.time - this.slipAt < 2.5 && (this.save.slipTips ?? 0) < 2 && !this.score.test) {
+          this.save.slipTips = (this.save.slipTips ?? 0) + 1;
+          writeSave(this.save);
+          const msg = this.isTouch
+            ? 'Vừa hụt chân thì kéo cần ngược lại ngay để bám lại mép · Muốn trèo xuống: đứng sát mép bấm THẢ'
+            : 'Vừa hụt chân thì bấm phím ngược hướng ngay để bám lại mép · Muốn trèo xuống: đứng sát mép bấm E';
+          setTimeout(() => this.ui.toast('Lỡ bước khỏi mép?', msg, false, 4600), 700);
+        }
+        this.slipAt = -99;
         const k = THREE.MathUtils.clamp(e.drop / 14, 0, 1);
         this.audio.land(0.2 + k);
         this.fx.dust.emit(feet, 4 + Math.round(k * 16), { speed: 2 + k * 4, up: 0.4, life: 0.6 + k * 0.5, size: 0.5 + k * 0.6 });

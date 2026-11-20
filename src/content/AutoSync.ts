@@ -40,6 +40,8 @@ export class AutoSync {
   }
 
   /** maps to fetch now, lowest first (a map needs the ones below it) */
+  /** downloaded maps kept below the player (falls, the way back, replays) */
+  static readonly BEHIND = 3;
   wanted(): MapStatus[] {
     const lim = this.anchorOrder() + AutoSync.AHEAD;
     return this.content.statuses().filter((s) => s.order <= lim && (s.state === 'download' || s.state === 'update'));
@@ -103,6 +105,12 @@ export class AutoSync {
       }
       await this.installed(s.id, fresh).catch((e) => console.warn('after install', e));
     }
+    // bounded storage: keep the maps around the player, drop far ones (they download again when needed)
+    const a = this.anchorOrder();
+    const st = this.content.statuses();
+    const ord = new Map(st.map((x) => [x.id, x.order]));
+    const keep = new Set(st.filter((x) => x.order >= a - AutoSync.BEHIND && x.order <= a + AutoSync.AHEAD).map((x) => x.id));
+    await this.content.prune(keep, (id) => Math.abs((ord.get(id) ?? a) - a)).catch((e) => console.warn('prune', e));
     this.set({ kind: 'idle' });
   }
 }

@@ -167,6 +167,37 @@ export class Effects {
   private spawners: { p: THREE.Vector3; rate: number; acc: number; kind: 'mist' | 'sparkle'; r: number }[] = [];
   private spinners: { o: THREE.Object3D; speed: number }[] = [];
   milestones: { y: number; sprite: THREE.Sprite; base: THREE.Vector3; reached: boolean }[] = [];
+  /** what each map added (so it can be taken away when the map is unloaded) */
+  private scopes = new Map<string, { objs: THREE.Object3D[]; items: Map<unknown[], unknown[]> }>();
+  private scopeMark: { id: string; children: number; lens: Map<unknown[], number> } | null = null;
+  private lists(): unknown[][] { return [this.waterMats, this.beamMats, this.glows, this.spawners, this.spinners, this.milestones, this.flocks]; }
+  /** Start recording what is added for map `id` (call endScope() right after, synchronously). */
+  beginScope(id: string) {
+    this.scopeMark = { id, children: this.group.children.length, lens: new Map(this.lists().map((l) => [l, l.length])) };
+  }
+  endScope() {
+    const m = this.scopeMark;
+    if (!m) return;
+    this.scopeMark = null;
+    const rec: { objs: THREE.Object3D[]; items: Map<unknown[], unknown[]> } = this.scopes.get(m.id) ?? { objs: [], items: new Map() };
+    rec.objs.push(...this.group.children.slice(m.children));
+    for (const [l, n] of m.lens) { const add = l.slice(n); if (add.length) rec.items.set(l, [...(rec.items.get(l) ?? []), ...add]); }
+    this.scopes.set(m.id, rec);
+  }
+  /** Remove (and free) everything map `id` added. */
+  removeScope(id: string) {
+    const rec = this.scopes.get(id);
+    if (!rec) return;
+    this.scopes.delete(id);
+    for (const o of rec.objs) {
+      this.group.remove(o);
+      o.traverse((c) => { const m = c as THREE.Mesh; m.geometry?.dispose?.(); });
+    }
+    for (const [l, items] of rec.items) {
+      const gone = new Set(items);
+      for (let i = l.length - 1; i >= 0; i--) if (gone.has(l[i])) l.splice(i, 1);
+    }
+  }
   private flocks: { center: THREE.Vector3; r: number; speed: number; phase: number; birds: { s: THREE.Sprite; off: THREE.Vector3; flap: number }[] }[] = [];
   exitPos = new THREE.Vector3();
 

@@ -5,7 +5,7 @@
 // Normalize Meshy prop: bottom at y=0, centered XZ, height = 1. Export optimized visual GLB + simplified collision mesh (.col.bin) + top heightmap.
 import { NodeIO, getBounds } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, prune, weld, textureCompress, meshopt, reorder, center, transformMesh, flatten } from '@gltf-transform/functions';
+import { dedup, prune, weld, textureCompress, meshopt, reorder, center, transformMesh, flatten, dequantize } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptSimplifier, MeshoptDecoder } from 'meshoptimizer';
 import sharp from 'sharp';
 import fs from 'fs';
@@ -13,7 +13,8 @@ const [,, input, outDir, name, baseSize='1024', colTris='1800'] = process.argv;
 await MeshoptEncoder.ready; await MeshoptSimplifier.ready; await MeshoptDecoder.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder, 'meshopt.decoder': MeshoptDecoder });
 const doc = await io.read(input);
-await doc.transform(flatten(), center({ pivot: 'below' }));
+// quantized exports (KHR_mesh_quantization: int16 positions, int8 normals) must be float before any transform is baked in
+await doc.transform(dequantize(), flatten(), center({ pivot: 'below' }));
 const scene = doc.getRoot().listScenes()[0];
 let b = getBounds(scene);
 const h = b.max[1] - b.min[1];
@@ -31,8 +32,12 @@ for (const node of doc.getRoot().listNodes()) {
 }
 b = getBounds(scene);
 // optional: cut away triangles whose centroid lies in a box (normalised coords), e.g. CUT="-0.56,-0.31,0.38,0.775,-0.2,0.2"
-if (process.env.CUT) {
-  const [x0, x1, y0, y1, z0, z1] = process.env.CUT.split(',').map(Number);
+// (several boxes separated by ';')
+// KEEP="box;box" does the opposite: keeps only the triangles inside the boxes (cut a moving part out of a model)
+if (process.env.CUT || process.env.KEEP) {
+  // several boxes: "box1;box2"
+  const keepMode = !!process.env.KEEP;
+  const boxes = (process.env.KEEP || process.env.CUT).split(';').map((b) => b.split(',').map(Number));
   for (const mesh of doc.getRoot().listMeshes()) for (const prim of mesh.listPrimitives()) {
     const P = prim.getAttribute('POSITION'), I = prim.getIndices();
     const a = [0, 0, 0], bb = [0, 0, 0], c = [0, 0, 0];
@@ -42,7 +47,10 @@ if (process.env.CUT) {
       const i0 = I.getScalar(t), i1 = I.getScalar(t + 1), i2 = I.getScalar(t + 2);
       P.getElement(i0, a); P.getElement(i1, bb); P.getElement(i2, c);
       const cx = (a[0] + bb[0] + c[0]) / 3, cy = (a[1] + bb[1] + c[1]) / 3, cz = (a[2] + bb[2] + c[2]) / 3;
-      if (cx > x0 && cx < x1 && cy > y0 && cy < y1 && cz > z0 && cz < z1) { cut++; continue; }
+      // a triangle taller than the box (a long post running through it) is never "inside"
+      const ty = Math.max(a[1], bb[1], c[1]) - Math.min(a[1], bb[1], c[1]);
+      const inBox = boxes.some(([x0, x1, y0, y1, z0, z1]) => cx > x0 && cx < x1 && cy > y0 && cy < y1 && cz > z0 && cz < z1 && ty <= y1 - y0);
+      if (inBox !== keepMode) { cut++; continue; }
       keep.push(i0, i1, i2);
     }
     const arr = P.getCount() > 65535 ? new Uint32Array(keep) : new Uint16Array(keep);
@@ -114,12 +122,16 @@ await doc.transform(dedup(), prune(), weld(),
     const tex = prim.getMaterial().getBaseColorTexture();
     const { data, info } = await sharp(Buffer.from(tex.getImage())).resize(256, 256).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     const UV = prim.getAttribute('TEXCOORD_0');
+    // quantized exports keep UVs as integers + KHR_texture_transform (scale / offset): apply it before sampling
+    const tt = prim.getMaterial().getBaseColorTextureInfo()?.getExtension('KHR_texture_transform');
+    const tsc = tt ? tt.getScale() : [1, 1], tof = tt ? tt.getOffset() : [0, 0];
     const n = P.getCount();
     const col = new Float32Array(n * 4);
     const tuv = [0, 0];
     const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     for (let i = 0; i < n; i++) {
       UV.getElement(i, tuv);
+      tuv[0] = tuv[0] * tsc[0] + tof[0]; tuv[1] = tuv[1] * tsc[1] + tof[1];
       const x = Math.min(info.width - 1, Math.max(0, Math.floor((tuv[0] - Math.floor(tuv[0])) * info.width)));
       const y = Math.min(info.height - 1, Math.max(0, Math.floor((tuv[1] - Math.floor(tuv[1])) * info.height)));
       const k = (y * info.width + x) * 3;

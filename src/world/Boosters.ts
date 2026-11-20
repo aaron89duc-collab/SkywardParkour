@@ -34,12 +34,13 @@ export class BoosterSystem {
     this.group.name = 'boosters';
   }
 
-  async build(pads: PadData[] = [], rings: RingData[] = [], ladders: LadderData[] = [], assets?: Assets) {
+  /** padModel: a map's own jump-pad model (file without .glb, normalised size w x d, pad surface at `top`) */
+  async build(pads: PadData[] = [], rings: RingData[] = [], ladders: LadderData[] = [], assets?: Assets, padModel?: { file: string; w: number; d: number; top: number }) {
     const glowTex = makeGlow();
     // jump pads are individual meshes (they squash when used); speed pads / rings come from the prefab system
     let padMesh: THREE.Mesh | null = null;
     if (assets && pads.some((p) => p.t === 'jump')) {
-      const g = await assets.gltf('assets/map002/jump_pad.glb');
+      const g = await assets.gltf(padModel ? `${padModel.file}.glb` : 'assets/map002/jump_pad.glb');
       const src = lod0Mesh(g.scene);
       // node transform baked in: model spans the normalised PAD_MODEL size, base at y = 0
       if (src) padMesh = new THREE.Mesh(bakedGeometry(src), src.material);
@@ -49,7 +50,7 @@ export class BoosterSystem {
     const markerMat = new THREE.MeshBasicMaterial({ color: '#7ff0ff', transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     for (const p of pads) {
       const s = p.s ?? 1;
-      const M = PAD_MODEL[p.t];
+      const M = p.t === 'jump' && padModel ? padModel : PAD_MODEL[p.t];
       const q = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(p.r));
       const h = M.top * s;
       const desc = RAPIER.ColliderDesc.cuboid((M.w * s) / 2 * 0.92, h / 2, (M.d * s) / 2 * 0.92)

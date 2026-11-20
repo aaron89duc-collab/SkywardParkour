@@ -57,6 +57,9 @@ export class GateSystem {
    */
   sync(maps: MapData[], loaded: (id: string) => boolean, text: (nextId: string, fallback: string) => { title: string; sub: string }) {
     const opened: string[] = [];
+    // a map that left the world takes its gate with it
+    const ids = new Set(maps.map((m) => m.id));
+    for (const [id, g] of [...this.gates]) if (!ids.has(id)) { this.remove(g); this.gates.delete(id); }
     for (const m of maps) {
       const ex = m.exit;
       if (!ex?.gate || !ex.next) continue;
@@ -86,7 +89,7 @@ export class GateSystem {
     group.add(sign);
     this.group.add(group);
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), gd.yaw);
-    const collider = this.physics.addBox(new THREE.Vector3(gd.p[0], gd.p[1] + gd.h / 2, gd.p[2]), new THREE.Vector3(gd.w / 2, gd.h / 2, 0.3), q, COLLISION.BOUNDARY);
+    const collider = this.physics.unowned(() => this.physics.addBox(new THREE.Vector3(gd.p[0], gd.p[1] + gd.h / 2, gd.p[2]), new THREE.Vector3(gd.w / 2, gd.h / 2, 0.3), q, COLLISION.BOUNDARY));
     return { mapId: m.id, next: m.exit.next, group, collider, mat, tex };
   }
 

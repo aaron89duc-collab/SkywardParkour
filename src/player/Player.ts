@@ -28,6 +28,8 @@ export type PlayerEvent =
   | { type: 'shimmy' }
   | { type: 'push' }
   | { type: 'lower' }
+  /** went over an edge without jumping (misstep or on purpose) */
+  | { type: 'slip' }
   | { type: 'drop' }
   | { type: 'step'; run: boolean }
   | { type: 'rescue' }
@@ -71,6 +73,7 @@ function approachAngle(a: number, b: number, maxStep: number) {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + THREE.MathUtils.clamp(d, -maxStep, maxStep);
 }
+const _carry = new THREE.Vector3();
 const smooth = THREE.MathUtils.smoothstep;
 
 /**
@@ -129,6 +132,11 @@ export class Player {
   private wishLen = 0;
   private takeoffPos = new THREE.Vector3();
   private takeoffSlow = false;
+  /** just went over an edge without jumping: a pull back toward it within this time still grabs it */
+  private reflexT = 0;
+  private reflexDir = new THREE.Vector3();
+  /** walked (not ran) off an edge: the body tips over the edge first (lighter gravity for a moment) */
+  private slipT = 0;
   private jumpedThisTick = false;
   private pushTimer = 0;
   private rollT = 0;
@@ -195,6 +203,8 @@ export class Player {
     this.fallPeakY = feet.y;
     this.regrab = 0.3;
     this.takeoffSlow = true;
+    this.reflexT = 0;
+    this.slipT = 0;
     this.takeoffPos.set(1e6, -1e6, 1e6);
     this.riding = null;
     this.ladder = null;
@@ -369,11 +379,13 @@ export class Player {
       this.grounded = false;
       this.state = 'air';
       this.airTime = 0;
+      this.reflexT = 0;
+      this.slipT = 0;
       this.fallPeakY = this.feetY;
       this.jumpAnimTimer = 0.45;
       this.takeoffPos.set(this.pos.x, this.feetY, this.pos.z);
       this.takeoffSlow = false;
-      if (this.riding) { this.vel.x += this.riding.vel.x; this.vel.z += this.riding.vel.z; this.vel.y += Math.max(0, this.riding.vel.y); }
+      if (this.riding) { const rv = this.riding.velAt(this.pos, dt); this.vel.x += rv.x; this.vel.z += rv.z; this.vel.y += Math.max(0, rv.y); }
       this.riding = null;
       this.events.push({ type: 'jump' });
     }
@@ -395,7 +407,8 @@ export class Player {
 
     // --- gravity
     if (!this.grounded || this.vel.y > 0) {
-      const g = this.vel.y > 0 ? PHYS.gravityUp : PHYS.gravityDown;
+      let g = this.vel.y > 0 ? PHYS.gravityUp : PHYS.gravityDown;
+      if (this.slipT > 0) { g *= PHYS.ledge.slipGravity; this.slipT = Math.max(0, this.slipT - dt); }
       this.vel.y = Math.max(-PHYS.terminalVelocity, this.vel.y - g * dt);
     } else this.vel.y = -1.5;
 
@@ -453,6 +466,8 @@ export class Player {
         }
       } else if (this.state === 'air') this.state = 'ground';
       this.airTime = 0;
+      this.reflexT = 0;
+      this.slipT = 0;
       this.fallPeakY = this.feetY;
       const sp = this.speed;
       this.stepDist += sp * dt;
@@ -469,21 +484,25 @@ export class Player {
       // running into a low obstacle -> vault over / mantle onto it
       if (this.state === 'ground' && this.tryObstacle(dt, blockedX < 0.6 || blockedZ < 0.6)) return;
     } else {
-      if (this.riding && wasGrounded && !this.jumpedThisTick) { this.vel.x += this.riding.vel.x; this.vel.z += this.riding.vel.z; }
+      if (this.riding && wasGrounded && !this.jumpedThisTick) { const rv = this.riding.velAt(this.pos, dt); this.vel.x += rv.x; this.vel.z += rv.z; }
       this.riding = null;
       if (wasGrounded && !this.jumpedThisTick && (this.state === 'ground' || this.state === 'roll')) {
         // stepped / ran off an edge
         this.takeoffPos.set(this.prevPos.x, this.prevPos.y - FEET, this.prevPos.z);
         this.takeoffSlow = wishLen < 0.55 && hSpeedBefore < 3.8;
         this.state = 'air';
-        if (this.takeoffSlow && hSpeedBefore > 0.3) {
-          // walking gently off a ledge: turn around and lower into a hang instead of falling
-          const d = new THREE.Vector3(this.vel.x, 0, this.vel.z).normalize();
-          if (this.tryLowerAt(d, true)) return;
-        }
+        // a misstep is a fall: no automatic turn-and-hang any more. Climbing down on purpose = the drop button;
+        // a quick pull back toward the edge still grabs it (reflex save, see tryAirLedge)
+        this.reflexT = PHYS.ledge.reflexWindow;
+        this.reflexDir.set(this.vel.x, 0, this.vel.z);
+        if (this.reflexDir.lengthSq() > 1e-4) this.reflexDir.normalize(); else this.reflexT = 0;
+        // walking (not running) over the edge: the body tips over first instead of dropping like a stone
+        if (hSpeedBefore < PHYS.ledge.slipMaxSpeed) { this.slipT = PHYS.ledge.slipTime; this.vel.y = Math.max(this.vel.y, 0); }
+        this.events.push({ type: 'slip' });
       }
       if (this.state === 'ground') this.state = 'air';
       this.airTime += dt;
+      this.reflexT = Math.max(0, this.reflexT - dt);
       this.fallPeakY = Math.max(this.fallPeakY, this.feetY);
       if (this.state === 'air' && this.hooks && this.tryLadder()) return;
       if (this.state === 'air' && this.regrab <= 0) this.tryAirLedge(dt);
@@ -535,6 +554,7 @@ export class Player {
     if (rel < L.mantleMinRel || rel > L.maxRel + sweep + extraRel) return null;
     const ledge = this.buildLedge(wall.point, n, ledgeY, rel, true);
     ledge.mover = this.hooks?.moverOf(down.collider) ?? null;
+    if (ledge.mover?.rotates) return null; // a turning jib has no edge to hang from (stand on it or nothing)
     return ledge;
   }
 
@@ -585,12 +605,34 @@ export class Player {
     return { edge, normal: n.clone(), y: ledgeY, rel, canClimb, standY, standOff, hangCenter, mover: null };
   }
 
-  /** Airborne: catch ledges while falling (any side), grab while jumping, pull up when just short. */
+  /** Airborne: grab ledges you move or push toward (jumping or falling), pull up when just short. */
   private tryAirLedge(dt: number) {
     const L = PHYS.ledge;
     const fallSpeed = Math.max(0, -this.vel.y);
     if (this.vel.y > L.maxUpVelocity) return;
     const falling = this.vel.y < 0;
+    // reflex save: went over an edge without jumping and pulls the stick back toward it within reflexWindow
+    // -> back up onto it while still high, otherwise hang from it. The edge is the one just left (found from
+    // the take-off point), so the save does not depend on where the falling body happens to be.
+    if (this.reflexT > 0 && this.wishLen > 0.3 && this.wish.dot(this.reflexDir) < -0.5) {
+      const below = this.takeoffPos.y - this.feetY;
+      let lg: Ledge | null = null;
+      if (below <= L.reflexMaxDrop) {
+        lg = this.findLowerLedge(this.reflexDir, true);
+        // odd shapes (slabs, sloped undersides): reach for it from where the body is, a hand further than usual
+        if (!lg) {
+          const p = this.findLedge(this.wish, fallSpeed * dt + 0.05, PHYS.capsuleRadius + L.reach + 0.45);
+          if (p && p.canClimb && -this.wish.dot(p.normal) > 0.5 && Math.abs(p.y - this.takeoffPos.y) < 0.6 && p.rel >= L.mantleMinRel && p.rel <= L.maxRel && (p.rel < L.minRel || p.hangCenter)) lg = p;
+        }
+      }
+      if (lg) {
+        this.reflexT = 0;
+        this.slipT = 0;
+        if (below < L.reflexMantleBelow && lg.canClimb) this.startMantle(lg);
+        else this.enterHang(lg, fallSpeed);
+        return;
+      }
+    }
     if (falling && fallSpeed > L.catchMaxFallSpeed) return;
     const f = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     const hv = new THREE.Vector3(this.vel.x, 0, this.vel.z);
@@ -618,16 +660,19 @@ export class Player {
       const n = ledge.normal;
       // intent: never grab when the player pushes away from the wall
       if (this.wishLen > 0.3 && this.wish.dot(n) > 0.55) continue;
-      // do not snatch the edge you just ran/jumped off on purpose
-      if (!this.takeoffSlow && this.airTime < 0.4 && Math.hypot(ledge.edge.x - this.takeoffPos.x, ledge.edge.z - this.takeoffPos.z) < 1.3 && Math.abs(ledge.y - this.takeoffPos.y) < 0.6) continue;
+      // the edge just stepped / ran / jumped off: only a quick pull back toward it grabs it again (reflex save)
+      const pullBack = this.wishLen > 0.3 && -this.wish.dot(n) > 0.5;
+      if (this.airTime < 0.6 && !pullBack && Math.hypot(ledge.edge.x - this.takeoffPos.x, ledge.edge.z - this.takeoffPos.z) < 1.3 && Math.abs(ledge.y - this.takeoffPos.y) < 0.6) continue;
       const toward = Math.max(hv.dot(n.clone().negate()) / Math.max(hv.length(), 0.001), this.wishLen > 0.2 ? -this.wish.dot(n) : -1);
       // just short of the top: pull up (mantle)
       if (ledge.canClimb && ledge.rel < L.mantleMaxRel && toward > 0.3 && fallSpeed < 8) { this.startMantle(ledge); return; }
       if (ledge.rel < L.minRel || !ledge.hangCenter || !ledge.canClimb || nearFloor) continue;
       // travelling away from this wall (e.g. jumped off it toward something else): let the player fly
       if (hv.dot(n) > 1.0) continue;
-      // rising grabs only in the travel direction; falling catches in any direction
+      // grabs need intent: moving or pushing toward the wall (rising: travel direction; falling: no more
+      // automatic catches of walls you merely slide past)
       if (!falling && toward < 0.2) continue;
+      if (falling && toward < 0.3) continue;
       this.enterHang(ledge, falling ? fallSpeed : 0);
       return;
     }
@@ -678,37 +723,46 @@ export class Player {
   }
 
   /** From standing on top, find the edge in direction d and lower into a hang below it. */
-  private tryLowerAt(d: THREE.Vector3, alreadyOff: boolean) {
+  /** The edge in direction d below which the player can hang (from standing on top, or just after leaving it). */
+  private findLowerLedge(d: THREE.Vector3, alreadyOff: boolean): Ledge | null {
     const physics = this.physics;
     const feet = alreadyOff ? this.takeoffPos.y : this.feetY;
     const base = alreadyOff ? this.takeoffPos : new THREE.Vector3(this.pos.x, feet, this.pos.z);
     if (!alreadyOff) {
       const ahead = new THREE.Vector3(base.x + d.x * 0.55, feet + 0.3, base.z + d.z * 0.55);
-      if (physics.raycast(ahead, DOWN, 0.8)) return false; // ground continues
+      if (physics.raycast(ahead, DOWN, 0.8)) return null; // ground continues
     }
     const out = alreadyOff ? 1.0 : 1.15;
     const o = new THREE.Vector3(base.x + d.x * out, feet - 0.25, base.z + d.z * out);
     const face = physics.raycast(o, d.clone().negate(), alreadyOff ? 2.4 : 1.3);
-    if (!face || Math.abs(face.normal.y) > 0.55) return false;
+    if (!face || Math.abs(face.normal.y) > 0.55) return null;
     const n = face.normal.clone().setY(0).normalize();
-    if (n.dot(d) < 0.4) return false;
+    if (n.dot(d) < 0.4) return null;
     const tp = face.point.clone().addScaledVector(n, -0.2);
     tp.y = feet + 0.4;
     const top = physics.raycast(tp, DOWN, 0.9);
-    if (!top || top.normal.y < 0.72 || Math.abs(top.point.y - feet) > 0.35) return false;
+    if (!top || top.normal.y < 0.72 || Math.abs(top.point.y - feet) > 0.35) return null;
     const ledgeY = top.point.y;
     // must be a real drop (not a small step)
     const below = physics.raycast(new THREE.Vector3(face.point.x + n.x * 0.7, ledgeY - 0.3, face.point.z + n.z * 0.7), DOWN, 1.5);
-    if (below) return false;
+    if (below) return null;
     const ledge = this.buildLedge(face.point, n, ledgeY, 0);
     ledge.mover = this.hooks?.moverOf(top.collider) ?? null;
-    if (ledge.mover) return false; // never climb down off a moving platform
-    if (!ledge.hangCenter) return false;
+    if (ledge.mover) return null; // never climb down off a moving platform
+    if (!ledge.hangCenter) return null;
     // the body goes over the edge and down the outside: both legs of that path must be open
     const overEdge = ledge.edge.clone().addScaledVector(ledge.normal, 0.5);
     overEdge.y = ledgeY + 0.5;
-    if (!this.clearPath(new THREE.Vector3(base.x, ledgeY + 0.5, base.z), overEdge)) return false;
-    if (!this.clearPath(overEdge, ledge.hangCenter)) return false;
+    if (!this.clearPath(new THREE.Vector3(base.x, ledgeY + 0.5, base.z), overEdge)) return null;
+    if (!this.clearPath(overEdge, ledge.hangCenter)) return null;
+    return ledge;
+  }
+
+  private tryLowerAt(d: THREE.Vector3, alreadyOff: boolean) {
+    const ledge = this.findLowerLedge(d, alreadyOff);
+    if (!ledge) return false;
+    const n = ledge.normal;
+    const feet = alreadyOff ? this.takeoffPos.y : this.feetY;
     const hand = this.model?.handHangHeight ?? 1.9;
     const hangFeet = ledge.edge.clone().addScaledVector(ledge.normal, 0.2);
     hangFeet.y = ledge.y - hand;
@@ -748,7 +802,9 @@ export class Player {
       this.hangRoot.add(d);
       if (this.ledge && this.ledge !== m.ledge) Player.shiftLedge(this.ledge, d);
     } else if (this.riding && (this.state === 'ground' || this.state === 'land' || this.state === 'roll')) {
-      d = this.riding.delta;
+      d = this.riding.carryAt(this.pos, _carry);
+      // a turning jib turns whoever stands on it (and their facing)
+      if (this.riding.rotates && this.riding.dAng) { this.yaw += this.riding.dAng; this.prevYaw += this.riding.dAng; this.visualYaw += this.riding.dAng; }
     }
     if (!d || d.lengthSq() < 1e-12) return;
     this.pos.add(d);

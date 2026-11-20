@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 
 /**
  * Downloadable map content (packs/*):
- *  - dev server: served live at /content/ (manifest.json + files/<sha256>), straight from packs/, no build step
+ *  - dev server: served live at /content/ (catalog.json, manifest.json, files/<sha256>), straight from packs/
  *  - build: when VITE_CONTENT_URL is not an absolute URL (no R2 configured yet), content-dist/ is copied into
  *    dist/content/ so the site still offers the maps as downloads (self-hosted fallback). With R2 configured
  *    the packs are NOT shipped with the app: players download them from R2 once and keep them offline.
@@ -20,7 +20,7 @@ function contentPlugin(contentUrl: string | undefined): Plugin {
       server.middlewares.use('/content/', async (req, res, next) => {
         try {
           // @ts-expect-error plain .mjs dev tool
-          const { scanPacks, manifestOf } = await import('./devtools/content.mjs');
+          const { scanPacks, manifestOf, catalogOf, packManifestOf } = await import('./devtools/content.mjs');
           const url = (req.url ?? '').split('?')[0];
           const packs = scanPacks(cache);
           res.setHeader('Access-Control-Allow-Origin', '*');
@@ -30,8 +30,14 @@ function contentPlugin(contentUrl: string | undefined): Plugin {
             res.end(JSON.stringify(manifestOf(packs)));
             return;
           }
+          if (url === '/catalog.json' || url === 'catalog.json') {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(catalogOf(packs)));
+            return;
+          }
           const m = /^\/?files\/([0-9a-f]{64})$/.exec(url);
           if (m) {
+            for (const p of packs) { const pm = packManifestOf(p); if (pm.sha === m[1]) { res.setHeader('Content-Type', 'application/json'); res.end(pm.json); return; } }
             for (const p of packs) for (const f of Object.values(p.files) as { abs: string; hash: string }[]) {
               if (f.hash === m[1]) { res.setHeader('Content-Type', 'application/octet-stream'); fs.createReadStream(f.abs).pipe(res); return; }
             }
