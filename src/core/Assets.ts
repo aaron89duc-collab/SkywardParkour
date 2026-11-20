@@ -7,6 +7,42 @@ export type CollisionMesh = { positions: Float32Array; indices: Uint32Array };
 const BASE = import.meta.env.BASE_URL;
 export const assetUrl = (p: string) => (p.startsWith('http') ? p : BASE + p.replace(/^\//, ''));
 
+/**
+ * Geometry of a glTF mesh with its node transform baked in (model space -> the normalised prefab space).
+ * Our GLBs are quantized (positions int16, normalised to -1..1) and keep the real size in the node's
+ * scale/offset: using `mesh.geometry` alone shrinks and sinks the model, and baking the matrix into int16
+ * positions overflows when the result leaves -1..1 (vertices wrap to the other side). Such positions are
+ * converted to float first; models that still fit stay quantized (less memory).
+ */
+export function bakedGeometry(mesh: THREE.Mesh): THREE.BufferGeometry {
+  const g = mesh.geometry.clone();
+  mesh.updateWorldMatrix(true, false);
+  const pos = g.getAttribute('position') as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  const quantized = pos.normalized || !(pos.array instanceof Float32Array);
+  if (quantized) {
+    g.computeBoundingBox();
+    const bb = g.boundingBox!.clone().applyMatrix4(mesh.matrixWorld);
+    const reach = Math.max(-bb.min.x, -bb.min.y, -bb.min.z, bb.max.x, bb.max.y, bb.max.z);
+    if (reach > 0.999) {
+      const n = pos.count, out = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { out[i * 3] = pos.getX(i); out[i * 3 + 1] = pos.getY(i); out[i * 3 + 2] = pos.getZ(i); }
+      g.setAttribute('position', new THREE.BufferAttribute(out, 3));
+    }
+  }
+  // normals / tangents stay unit length under the transform: their quantized form is fine
+  g.applyMatrix4(mesh.matrixWorld);
+  g.computeBoundingBox();
+  g.computeBoundingSphere();
+  return g;
+}
+
+/** First non-LOD1 mesh of a loaded glTF scene. */
+export function lod0Mesh(scene: THREE.Object3D): THREE.Mesh | null {
+  let mesh: THREE.Mesh | null = null;
+  scene.traverse((o) => { if (!mesh && (o as THREE.Mesh).isMesh && !/lod1/i.test(o.name) && !/lod1/i.test(o.parent?.name ?? '')) mesh = o as THREE.Mesh; });
+  return mesh;
+}
+
 /** Cached loader for GLB models, collision meshes, textures and JSON. Reports progress. */
 export class Assets {
   private gltfCache = new Map<string, Promise<GLTF>>();

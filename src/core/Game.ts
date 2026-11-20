@@ -23,6 +23,7 @@ import { Score, loadSave, writeSave, challengeOf, type SaveData, type GameMode }
 import { Achievements, type AchDef } from '../systems/Achievements';
 import { Admin } from '../systems/Admin';
 import { ContentManager } from '../content/ContentManager';
+import { AutoSync, type SyncView } from '../content/AutoSync';
 import { Leaderboard } from '../online/Leaderboard';
 import { OnlineUI } from '../ui/OnlineUI';
 import type { MenuInfo } from '../ui/UI';
@@ -74,6 +75,8 @@ export class Game {
   admin: Admin | null = null;
   /** maps: inside the app + downloaded (offline-first, see content/ContentManager.ts) */
   content = new ContentManager();
+  autoSync!: AutoSync;
+  private syncKind: SyncView['kind'] = 'idle';
   lb!: Leaderboard;
   private lbTimer = 30;
   /** Adventure (continue from conquered maps) or Challenge (always from 0 m, records + achievements only) */
@@ -209,8 +212,9 @@ export class Game {
     // the city above the clouds streams in behind the menu (seamless world: it is visible from the village)
     this.startDevPacks();
     void this.loadOtherMaps();
-    // online? (background, short timeout, never blocks play) -> new maps / updates are offered in the menu
-    if (!this.devPacks) void this.content.check();
+    // online? (background, short timeout, never blocks play) -> the next maps download by themselves
+    if (this.devPacks) void this.devPacks.then(() => this.autoSync.kick());
+    else this.autoSync.kick();
   }
 
   private otherMaps: Promise<void> | null = null;
@@ -564,19 +568,10 @@ export class Game {
     this.ach = new Achievements(this.save, () => [...this.maps.loaded.values()].map((m) => m.data).sort((x, y) => x.origin[1] - y.origin[1]));
     const host = {
       statuses: () => this.content.statuses(),
-      installing: () => this.content.installing,
-      contentOnline: () => this.content.online,
-      checkedAt: () => this.content.state.manifestAt,
-      install: async (id: string) => {
-        await this.content.install(id, () => this.ui.online?.refresh());
-        await this.loadOtherMaps(); // a new map joins the world right away (updates of a map in use: next start)
-        this.ui.refreshMaps();
-      },
-      remove: async (id: string) => { await this.content.remove(id); this.ui.refreshMaps(); },
-      check: async () => { await this.content.check(); },
-      pendingRestart: (id: string) => this.content.updatePendingRestart(id),
-      restartApp: () => location.reload(),
-      usage: () => this.content.store.usage(),
+      progress: (id: string) => ({
+        conquered: !!this.save.highestMap && this.orderOf(id) <= this.orderOf(this.save.highestMap),
+        best: this.save.bestTimes?.[id] ?? (id === this.firstMapId ? this.save.bestTime ?? null : null),
+      }),
       lbEnabled: () => this.lb.enabled,
       board: (b: string) => this.lb.board(b),
       boards: () => [{ id: 'height', label: 'Độ cao' }, ...this.content.statuses().map((s) => ({ id: `time:${s.id}`, label: s.name }))],
@@ -585,8 +580,21 @@ export class Game {
       click: () => this.audio.click(),
     };
     this.ui.online = new OnlineUI(this.container, host);
-    // back online: send waiting results, look for new maps
-    window.addEventListener('online', () => { void this.lb.sync(); void this.content.check(); });
+    // back online: send waiting results (new maps: AutoSync listens by itself)
+    window.addEventListener('online', () => { void this.lb.sync(); });
+    // keep the next maps on the device without a tap or a message: up to 3 maps past the furthest one in play.
+    // The player only ever sees a warning when maps ahead are missing and there is no internet.
+    this.autoSync = new AutoSync(
+      this.content,
+      () => Math.max(this.orderOf(this.map?.id ?? null) || 1, this.orderOf(this.save.highestMap) || 1),
+      async (_id, fresh) => { if (fresh) await this.loadOtherMaps(); this.ui.refreshMaps(); },
+      (v) => {
+        this.ui.setSync(v);
+        // gate signs ask for internet while offline: redraw only when that changes
+        if (v.kind !== this.syncKind) { this.syncKind = v.kind; this.syncGates(); this.ui.online?.refresh(); }
+      },
+    );
+
   }
 
   private menuInfo(): MenuInfo {
@@ -606,7 +614,7 @@ export class Game {
     const p = this.lb?.profile;
     const achList = this.ach?.list() ?? [];
     return {
-      name: p?.name ?? null, tag: p?.tag, continueFrom, conquered, bestTime, news: this.content.news().length > 0,
+      name: p?.name ?? null, tag: p?.tag, continueFrom, conquered, bestTime,
       mode: this.save.mode ?? 'adventure', challengeBest: this.save.challenge?.best ?? 0,
       achievements: { got: achList.filter((a) => this.ach.has(a.id)).length, total: achList.length },
     };
@@ -626,14 +634,14 @@ export class Game {
   /** What the player is told about the map after `id` when it is not in the world (gate sign, finish panel). */
   nextInfo(id: string, fallback: string): { title: string; sub: string; html: string } {
     const s = this.content.statuses().find((x) => x.id === id);
-    const mb = (b: number) => `${Math.max(0.1, b / 1048576).toFixed(1)} MB`;
     const title = s?.name ?? fallback;
+    // nothing about downloads: the next map comes by itself; offline the player is asked for internet
     let sub: string;
-    if (s?.state === 'download' || s?.state === 'update') sub = `Chưa có trên máy · Menu → Bản đồ để tải (${mb(s.bytes)})`;
-    else if (s?.state === 'needs-app') sub = 'Cần cập nhật ứng dụng để chơi map này';
-    else if (s?.source) sub = 'Đang dựng bản đồ…';
-    else if (this.content.online === false) sub = 'Kết nối mạng để kiểm tra map mới';
-    else sub = 'Sắp ra mắt – game sẽ báo khi có map mới';
+    if (s?.state === 'needs-app') sub = 'Cần bản game mới để mở đường này';
+    else if (s && this.maps.map(id)) sub = 'Đang mở đường…';
+    else if (this.content.online === false) sub = s ? 'Bật mạng internet để mở đường này' : 'Bật mạng internet để kiểm tra map mới';
+    else if (s) sub = 'Sắp mở…';
+    else sub = 'Sắp ra mắt';
     return { title, sub, html: `Cổng sang <b>${title}</b><br><span style="font-weight:400;font-size:13px">${sub}</span>` };
   }
 
@@ -758,6 +766,7 @@ export class Game {
       const fellBack = here.origin[1] < this.map.origin[1];
       this.map = here;
       this.setHudMap(here);
+      this.autoSync.kick(1500); // the window of maps kept ahead moves with the player
       if (fellBack) this.ui.toast(`Rơi xuống ${here.name}`, `Kỷ lục lượt này vẫn giữ: ${Math.floor(this.score.runMax)} m — leo lại thôi!`, false, 3600);
       else if (here.id !== this.firstMapId) this.ui.toast(here.name, `Map ${here.id.slice(3)} · ${here.origin[1]}–${here.origin[1] + here.height} m`, true, 3200);
     }

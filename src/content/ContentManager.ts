@@ -25,7 +25,7 @@ const BASE = import.meta.env.BASE_URL;
 const ENV_URL = (import.meta.env.VITE_CONTENT_URL as string | undefined)?.trim();
 export const CONTENT_URL = ENV_URL ? (ENV_URL.endsWith('/') ? ENV_URL : ENV_URL + '/') : BASE + 'content/';
 
-export type BundledEntry = MapRegistryEntry & { order: number; bundled: true; version?: number; hash?: string };
+export type BundledEntry = MapRegistryEntry & { order: number; bundled: true; version?: number; hash?: string; summary?: string };
 
 export type MapStatus = {
   id: string;
@@ -214,7 +214,7 @@ export class ContentManager {
       else if (!s) state = 'download';
       else if (r && r.hash !== hash && r.version >= (version ?? 0)) state = 'update';
       if (s && !playable.has(id)) state = 'needs-previous';
-      out.push({ id, name, order, yMin, summary: r?.summary ?? (s?.kind === 'pack' ? s.p.summary ?? '' : ''), source: s?.kind ?? null, version, remote: r, state, bytes: r && (state === 'download' || state === 'update') ? this.missingBytes(r) : 0 });
+      out.push({ id, name, order, yMin, summary: r?.summary ?? (s?.kind === 'pack' ? s.p.summary ?? '' : s?.kind === 'bundled' ? s.b.summary ?? '' : ''), source: s?.kind ?? null, version, remote: r, state, bytes: r && (state === 'download' || state === 'update') ? this.missingBytes(r) : 0 });
     }
     return out.sort((a, b) => a.order - b.order);
   }
@@ -223,12 +223,32 @@ export class ContentManager {
   news() { return this.statuses().filter((s) => s.state === 'download' || s.state === 'update'); }
 
   // ---------------------------------------------------------------- install / update
-  /** Download a map (and any map below it that is missing), verify every file, then switch atomically. */
-  async install(id: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
+  private queue: Promise<unknown> = Promise.resolve();
+  private inflight = new Map<string, Promise<void>>();
+
+  /**
+   * Download a map (and any map below it that is missing), verify every file, then switch atomically.
+   * Installs run one at a time (automatic background downloads and the maps menu share this queue);
+   * asking again for a map that is already queued returns the same promise.
+   */
+  install(id: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
+    const cur = this.inflight.get(id);
+    if (cur) return cur;
+    const run = this.queue.then(() => this.installNow(id, onProgress, signal));
+    this.queue = run.catch(() => {});
+    this.inflight.set(id, run);
+    void run.catch(() => {}).finally(() => this.inflight.delete(id));
+    return run;
+  }
+
+  private async installNow(id: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
     const r = this.state.manifest?.maps.find((x) => x.id === id);
     if (!r) throw new Error('Không tìm thấy map trên máy chủ');
     if (r.minApp > APP_CONTENT_VERSION) throw new Error('Cần cập nhật ứng dụng để chơi map này');
-    for (const dep of r.requires ?? []) if (!this.entries().some((e) => e.id === dep)) await this.install(dep, onProgress, signal);
+    // already up to date (queued twice, or installed meanwhile)
+    const have = this.source(id);
+    if (have && (have.kind === 'bundled' ? have.b.hash : have.p.hash) === r.hash) return;
+    for (const dep of r.requires ?? []) if (!this.entries().some((e) => e.id === dep)) await this.installNow(dep, onProgress, signal);
     void this.store.requestPersist();
 
     const need: [string, number][] = [];

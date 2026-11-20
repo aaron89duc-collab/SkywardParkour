@@ -109,7 +109,7 @@ export function build() {
   const idx = JSON.parse(fs.readFileSync(idxFile, 'utf8'));
   for (const m of manifest.maps.filter((m) => m.bundled)) {
     const e = idx.find((x) => x.id === m.id);
-    if (e) { e.version = m.version; e.hash = m.hash; }
+    if (e) { e.version = m.version; e.hash = m.hash; if (m.summary) e.summary = m.summary; }
   }
   fs.writeFileSync(idxFile, JSON.stringify(idx, null, 1) + '\n');
   for (const m of manifest.maps) console.log(`${m.id} v${m.version}${m.bundled ? ' (bundled in app)' : ''}: ${Object.keys(m.files).length} files, ${(m.size / 1048576).toFixed(1)} MB`);

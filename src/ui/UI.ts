@@ -1,4 +1,5 @@
 import type { ZoneData } from '../world/MapTypes';
+import type { SyncView } from '../content/AutoSync';
 import type { SaveData, GameMode } from '../systems/Score';
 import type { Quality } from '../config';
 import { fullscreenSupported, isFullscreen, isIOS, isStandalone } from './Fullscreen';
@@ -12,8 +13,6 @@ export type MenuInfo = {
   continueFrom: { id: string; name: string; y: number }[];
   conquered: string | null;
   bestTime: { label: string; value: number } | null;
-  /** new maps / updates waiting (dot on the Maps button) */
-  news: boolean;
   mode: GameMode;
   challengeBest: number;
   achievements: { got: number; total: number };
@@ -58,6 +57,7 @@ export class UI {
   private loadBar: HTMLDivElement;
   private loadTip: HTMLDivElement;
   private menu: HTMLDivElement;
+  private syncPill: HTMLDivElement;
   private hud: HTMLDivElement;
   private pause: HTMLDivElement;
   private settings: HTMLDivElement;
@@ -105,6 +105,10 @@ export class UI {
     this.menu = el('div', 'menu hidden');
     parent.appendChild(this.menu);
 
+    // background map download / offline warning (menu + HUD, never blocks a tap)
+    this.syncPill = el('div', 'sync-pill hidden');
+    parent.appendChild(this.syncPill);
+
     // hud
     this.hud = el('div', 'hud hidden', `
       <div class="height"><div class="cur">0<small>m</small></div><span class="test-badge hidden">TEST</span><span class="mode-badge hidden">THỬ THÁCH</span><div class="lines"></div></div>
@@ -147,6 +151,16 @@ export class UI {
     parent.appendChild(this.finish);
   }
 
+  /** the only thing players ever see of map downloads: a warning while maps ahead are missing offline */
+  setSync(v: SyncView) {
+    const p = this.syncPill;
+    if (v.kind !== 'offline') { p.classList.add('hidden'); return; }
+    const what = v.names.length === 1 ? `<b>${esc(v.names[0])}</b>` : v.names.length > 1 ? `${v.names.length} map tiếp theo` : 'map tiếp theo';
+    p.dataset.kind = v.kind;
+    p.innerHTML = `<span class="ic"></span><span class="tx">Không có mạng – chưa tải được ${what}<small>Bật mạng internet, game sẽ tự tải về</small></span>`;
+    p.classList.remove('hidden');
+  }
+
   updateOrientation() {
     const portrait = window.innerHeight > window.innerWidth * 1.05;
     this.rotate.classList.toggle('hidden', !(this.touch && portrait && !this.rotateDismissed));
@@ -173,7 +187,7 @@ export class UI {
   // ---------------- menu
   showMenu(save: SaveData, portraits: Record<string, string>, quality: Quality) {
     this.menuArgs = [save, portraits, quality];
-    const info: MenuInfo = this.h.menuInfo?.() ?? { name: null, continueFrom: [], conquered: null, bestTime: null, news: false, mode: 'adventure', challengeBest: 0, achievements: { got: 0, total: 0 } };
+    const info: MenuInfo = this.h.menuInfo?.() ?? { name: null, continueFrom: [], conquered: null, bestTime: null, mode: 'adventure', challengeBest: 0, achievements: { got: 0, total: 0 } };
     this.character = save.character;
     this.quality = quality;
     const best = save.personalBest;
@@ -197,9 +211,8 @@ export class UI {
           <button class="btn mode challenge ${info.mode === 'challenge' ? 'last' : ''}" data-mode="challenge"><b>THỬ THÁCH</b><span>Luôn từ 0 m · rơi bao nhiêu leo lại bấy nhiêu</span></button>
         </div>
         ${info.continueFrom.map((c) => `<button class="btn secondary city" data-cont="${c.id}">Phiêu lưu tiếp từ ${esc(c.name)} · ${Math.round(c.y)} m</button>`).join('')}
-        ${this.online?.newsHtml() ?? ''}
         ${this.touch && isIOS() && !isStandalone() ? '<div class="ios-tip">iPhone: bấm <b>Chia sẻ</b> → <b>Thêm vào MH chính</b> để chơi toàn màn hình</div>' : ''}
-        <div class="row"><button class="btn secondary ${info.news ? 'dot' : ''}" data-a="maps">Bản đồ</button><button class="btn secondary" data-a="lb">Bảng xếp hạng</button><button class="btn secondary" data-a="ach">Thành tích ${info.achievements.got}/${info.achievements.total}</button><button class="btn secondary" data-a="settings">Cài đặt</button></div>
+        <div class="row"><button class="btn secondary" data-a="maps">Bản đồ</button><button class="btn secondary" data-a="lb">Bảng xếp hạng</button><button class="btn secondary" data-a="ach">Thành tích ${info.achievements.got}/${info.achievements.total}</button><button class="btn secondary" data-a="settings">Cài đặt</button></div>
         <div class="stats">
           <div class="stat"><b>${best.toFixed(0)} m</b><span>Kỷ lục Phiêu lưu</span></div>
           <div class="stat"><b>${info.challengeBest.toFixed(0)} m</b><span>Kỷ lục Thử thách</span></div>
@@ -222,7 +235,6 @@ export class UI {
     this.menu.querySelector('[data-a=maps]')?.addEventListener('click', () => { this.h.onClick(); this.online?.openMaps(); });
     this.menu.querySelector('[data-a=lb]')?.addEventListener('click', () => { this.h.onClick(); this.online?.openLeaderboard(); });
     this.menu.querySelector('[data-a=name]')?.addEventListener('click', () => { this.h.onClick(); if (this.online) { this.online.onNameSet = () => this.refreshMaps(); this.online.openName(); } });
-    this.online?.bindNews(this.menu, () => this.refreshMaps());
     (this.menu.querySelector('[data-a=settings]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.openSettings('menu'); });
     this.menu.classList.remove('hidden');
   }

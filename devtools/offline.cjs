@@ -1,7 +1,7 @@
 // Download Once – Play Offline – Update When Online, end to end, against a production build.
 // Needs: `VITE_API_URL=http://127.0.0.1:8787 npx vite build`, `npx vite preview --port 4173`, and the API worker
 // (`cd server && npx wrangler dev --local --port 8787`).
-// Usage: node devtools/offline.cjs
+// Usage: node devtools/offline.cjs   (maps download by themselves; more on that in devtools/autosync.cjs)
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
@@ -30,7 +30,8 @@ function contentBuild() {
   const menu = () => page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 240000 });
   const still = () => page.evaluate(() => window.__game.renderer.setAnimationLoop(null));
   try {
-    // ---------------- 1. first launch, online
+    // ---------------- 1. first launch, online (map files held back for a moment: the gate test needs Map 002 missing)
+    await page.route('**/content/files/**', (r) => r.abort());
     await page.goto(URL0);
     await menu();
     out.firstLaunch = await page.evaluate(() => ({ nameAsked: !document.querySelector('.name-box').classList.contains('hidden'), maps: window.__game.content.entries().map((e) => e.id) }));
@@ -43,7 +44,8 @@ function contentBuild() {
     await page.evaluate(() => window.__game.loadOtherMaps());
     out.beforeDownload = await page.evaluate(() => ({
       profile: window.__game.save.profile?.name, statuses: window.__game.content.statuses().map((s) => `${s.id}:${s.state}:${(s.bytes / 1048576).toFixed(1)}MB`),
-      gateMap001Closed: window.__game.maps.gates.closed('map001'), news: document.querySelector('.news')?.textContent?.replace(/\s+/g, ' ').trim(),
+      gateMap001Closed: window.__game.maps.gates.closed('map001'), gateSign: window.__game.nextInfo('map002', '').sub,
+      warningShown: !document.querySelector('.sync-pill').classList.contains('hidden'),
     }));
     // the closed gate at the top of Map 001 holds: run north into it
     out.gateBlocks = await page.evaluate(() => {
@@ -55,9 +57,10 @@ function contentBuild() {
       I.touchMoveY = 0; g.state = 'menu';
       return { z: +P.pos.z.toFixed(2), y: +P.feetY.toFixed(2) };
     });
-    // ---------------- 2. download Map 002 from the Maps panel
-    await page.click('[data-a=maps]');
-    await page.click('.maps-box [data-m=get][data-id=map002]');
+    // ---------------- 2. Map 002 arrives by itself (no tap): files reachable again, next attempt
+    await page.unroute('**/content/files/**');
+    fileReqs.length = 0;
+    await page.evaluate(() => window.__game.autoSync.kick());
     await page.waitForFunction(() => !!window.__game.maps.map('map002'), null, { timeout: 240000 });
     out.afterDownload = await page.evaluate(() => ({
       statuses: window.__game.content.statuses().map((s) => `${s.id}:${s.state}:v${s.version}`), gateMap001Closed: window.__game.maps.gates.closed('map001'),
@@ -75,7 +78,9 @@ function contentBuild() {
     out.offlineStart = await page.evaluate(async () => ({
       online: navigator.onLine, maps: [...window.__game.maps.loaded.keys()], controlledBySW: !!navigator.serviceWorker.controller,
       gateMap001Closed: window.__game.maps.gates.closed('map001'), gateMap002Closed: window.__game.maps.gates.closed('map002'),
-      mapsPanel: (window.__game.ui.online.openMaps(), document.querySelector('.maps-status span').textContent),
+      warningShown: !document.querySelector('.sync-pill').classList.contains('hidden'), // nothing ahead is missing: no warning
+      mapsPanel: (window.__game.ui.online.openMaps(), [...document.querySelectorAll('.maps-box .map-row')].map((r) => r.textContent.replace(/\s+/g, ' ').trim())),
+      mapsPanelButtons: document.querySelectorAll('.maps-box button').length,
     }));
     // ---------------- 4. play Map 002 offline to the top: finish counts, the safe gate holds
     out.offlinePlay = await page.evaluate(async () => {

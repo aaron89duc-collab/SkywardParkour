@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Assets } from '../core/Assets';
+import { Assets, bakedGeometry } from '../core/Assets';
 import { Physics } from '../core/Physics';
 import type { PrefabData } from './MapTypes';
 
@@ -93,9 +93,7 @@ export class PrefabSystem {
       const lod0Mesh = meshes.find((m) => !/lod1/i.test(m.name) && !/lod1/i.test(m.parent?.name ?? '')) ?? meshes[0];
       const lod1Mesh = meshes.find((m) => m !== lod0Mesh && (/lod1/i.test(m.name) || /lod1/i.test(m.parent?.name ?? ''))) ?? null;
       const prepare = (m: THREE.Mesh) => {
-        const g = m.geometry.clone();
-        g.applyMatrix4(m.matrixWorld);
-        g.computeBoundingSphere();
+        const g = bakedGeometry(m);
         const mat = m.material as THREE.MeshStandardMaterial;
         mat.envMapIntensity = 0.55;
         mat.roughness = 0.92;

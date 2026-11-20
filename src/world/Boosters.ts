@@ -4,7 +4,7 @@ import type { PadData, RingData, LadderData } from './MapTypes';
 import { Physics } from '../core/Physics';
 import { COLLISION } from '../config';
 import * as CT from './CityTextures';
-import { Assets } from '../core/Assets';
+import { Assets, bakedGeometry, lod0Mesh } from '../core/Assets';
 
 const Y = new THREE.Vector3(0, 1, 0);
 
@@ -40,7 +40,9 @@ export class BoosterSystem {
     let padMesh: THREE.Mesh | null = null;
     if (assets && pads.some((p) => p.t === 'jump')) {
       const g = await assets.gltf('assets/map002/jump_pad.glb');
-      g.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && !/lod1/i.test(o.name) && !/lod1/i.test(o.parent?.name ?? '') && !padMesh) padMesh = o as THREE.Mesh; });
+      const src = lod0Mesh(g.scene);
+      // node transform baked in: model spans the normalised PAD_MODEL size, base at y = 0
+      if (src) padMesh = new THREE.Mesh(bakedGeometry(src), src.material);
     }
     const arrowMat = new THREE.MeshBasicMaterial({ color: '#ffb340', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     const arrowGeo = makeArrow();

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { MoverData } from './MapTypes';
 import { Physics } from '../core/Physics';
-import { Assets } from '../core/Assets';
+import { Assets, bakedGeometry, lod0Mesh } from '../core/Assets';
 import { COLLISION } from '../config';
 import * as CT from './CityTextures';
 
@@ -121,13 +121,10 @@ export class MoverSystem {
     const hazard = new THREE.MeshStandardMaterial({ map: CT.hazardTex(), roughness: 0.7 });
     const yellow = new THREE.MeshStandardMaterial({ map: CT.metalTex(12, 45, 80, 52), roughness: 0.5, metalness: 0.2 });
     const cableMat = new THREE.MeshStandardMaterial({ color: '#2b2d31', roughness: 0.6, metalness: 0.5 });
-    const crate = list.some((m) => m.kind === 'crane') ? await assets.gltf('assets/map002/wooden_crate.glb') : null;
     const hover = list.some((m) => m.kind === 'hover') ? await assets.gltf('assets/map002/hover_platform.glb') : null;
-    const lod0 = (g: { scene: THREE.Object3D }) => {
-      let mesh: THREE.Mesh | null = null;
-      g.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && !/lod1/i.test(o.name) && !/lod1/i.test(o.parent?.name ?? '') && !mesh) mesh = o as THREE.Mesh; });
-      return mesh as THREE.Mesh | null;
-    };
+    // node transform baked in: the model spans its normalised size (base at y = 0, deck top at 0.955)
+    const hoverSrc = hover ? lod0Mesh(hover.scene) : null;
+    const hoverGeo = hoverSrc ? bakedGeometry(hoverSrc) : null;
     for (const d of list) {
       const m = new Mover(d);
       const yaw = THREE.MathUtils.degToRad(d.r ?? 0);
@@ -155,20 +152,6 @@ export class MoverSystem {
           inner.add(lip);
         }
         addBox(new THREE.Vector3(S / 2, T / 2, S / 2), new THREE.Vector3(0, -T / 2, 0));
-        // a crate strapped to one corner (also solid: a step up / something to hide behind)
-        if (crate) {
-          const src = lod0(crate);
-          if (src) {
-            const cs = 1.25;
-            const cm = new THREE.Mesh(src.geometry, src.material);
-            cm.scale.setScalar(cs);
-            cm.position.set(S / 2 - 0.75, 0, -S / 2 + 0.75);
-            cm.rotation.y = 0.3;
-            cm.castShadow = cm.receiveShadow = true;
-            inner.add(cm);
-            addBox(new THREE.Vector3(0.62, 0.62, 0.58), new THREE.Vector3(S / 2 - 0.75, 0.62, -S / 2 + 0.75));
-          }
-        }
         // slings to a hook block
         const hookY = 2.6;
         m.setHookHeight(hookY);
@@ -192,11 +175,10 @@ export class MoverSystem {
         this.group.add(cable);
         m.trolley = trolley;
         m.cable = cable;
-      } else if (hover) {
+      } else {
         const s = d.s ?? 2;
-        const src = lod0(hover);
-        if (src) {
-          const hm = new THREE.Mesh(src.geometry, src.material);
+        if (hoverSrc && hoverGeo) {
+          const hm = new THREE.Mesh(hoverGeo, hoverSrc.material);
           hm.scale.setScalar(s);
           hm.position.y = -0.955 * s;
           hm.castShadow = hm.receiveShadow = true;

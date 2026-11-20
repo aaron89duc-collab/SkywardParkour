@@ -7,7 +7,7 @@
  "entry": "maps/map001.json",
  "minApp": 1,
  "requires": [],
- "summary": "Làng khởi đầu · 0 → 140 m · có sẵn trong app",
+ "summary": "Làng khởi đầu · 0 → 140 m · 5 khu",
  "bundled": true,
  "root": "../../public",
  "include": [

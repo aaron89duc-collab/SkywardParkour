@@ -1,18 +1,12 @@
-import type { MapStatus, Progress } from '../content/ContentManager';
+import type { MapStatus } from '../content/ContentManager';
 import type { BoardResult } from '../online/Leaderboard';
 
 /** What the online parts of the menu need from the game (content manager + leaderboard). */
 export interface OnlineHost {
+  /** every map the game knows about: in the app, downloaded, or only announced by the server */
   statuses(): MapStatus[];
-  installing(): Progress | null;
-  contentOnline(): boolean | null;
-  checkedAt(): number;
-  install(id: string): Promise<void>;
-  remove(id: string): Promise<void>;
-  check(): Promise<void>;
-  pendingRestart(id: string): boolean;
-  restartApp(): void;
-  usage(): Promise<{ used: number; quota: number } | null>;
+  /** the player's own progress on a map (nothing about downloads) */
+  progress(id: string): { conquered: boolean; best: number | null };
   lbEnabled(): boolean;
   board(b: string): Promise<BoardResult | null>;
   boards(): { id: string; label: string }[];
@@ -21,7 +15,6 @@ export interface OnlineHost {
   click(): void;
 }
 
-const mb = (b: number) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const ago = (t: number) => {
   if (!t) return 'chưa từng';
@@ -34,15 +27,13 @@ const ago = (t: number) => {
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 /**
- * Online-related menu UI: player name, maps (download once / update / remove), new-content notice, leaderboard.
- * Everything works offline: the maps panel shows what is on the device, the leaderboard shows the last saved copy.
+ * Online-related menu UI: player name, the list of maps, achievements, leaderboard. Everything works offline.
+ * Downloads are never shown here: the game keeps the next maps on the device by itself (see AutoSync).
  */
 export class OnlineUI {
   private nameBox: HTMLDivElement;
   private mapsBox: HTMLDivElement;
   private lbBox: HTMLDivElement;
-  private dismissed = new Set<string>();
-  private errors = new Map<string, string>();
   private lbTab = 'height';
   private lbMode: 'c' | 'a' = 'c';
   onNameSet: (() => void) | null = null;
@@ -80,89 +71,32 @@ export class OnlineUI {
 
   // ---------------------------------------------------------------- new content notice (inside the menu)
   /** HTML for the menu banner: new maps / updates found by the last online check */
-  newsHtml() {
-    const news = this.h.statuses().filter((s) => (s.state === 'download' || s.state === 'update') && !this.dismissed.has(`${s.id}:${s.remote?.hash}`));
-    if (!news.length) return '';
-    const s = news[0];
-    const what = s.state === 'download' ? `Có map mới: <b>${esc(s.name)}</b>` : `Có bản cập nhật <b>${esc(s.name)}</b> v${s.remote?.version}`;
-    const more = news.length > 1 ? ` <span class="more">+${news.length - 1}</span>` : '';
-    return `<div class="news" data-id="${s.id}" data-hash="${s.remote?.hash ?? ''}"><span>${what} (${mb(s.bytes)})${more}</span>
-      <button class="btn secondary" data-n="get">${s.state === 'download' ? 'Tải ngay' : 'Cập nhật'}</button><button class="btn secondary" data-n="later">Để sau</button></div>`;
-  }
-
-  bindNews(root: HTMLElement, rerender: () => void) {
-    const n = root.querySelector('.news') as HTMLElement | null;
-    if (!n) return;
-    n.querySelector('[data-n=get]')?.addEventListener('click', () => { this.h.click(); this.openMaps(); void this.install(n.dataset.id!); });
-    n.querySelector('[data-n=later]')?.addEventListener('click', () => { this.h.click(); this.dismissed.add(`${n.dataset.id}:${n.dataset.hash}`); rerender(); });
-  }
-
   // ---------------------------------------------------------------- maps panel
   openMaps() {
     this.mapsBox.classList.remove('hidden');
     this.renderMaps();
   }
 
-  /** called when content state changes (progress, check finished, install done) */
+  /** called when the list of known maps changes */
   refresh() { if (!this.mapsBox.classList.contains('hidden')) this.renderMaps(); }
 
-  private async install(id: string) {
-    this.errors.delete(id);
-    try { await this.h.install(id); } catch (e) { this.errors.set(id, (e as Error).message || 'Tải thất bại'); }
-    this.refresh();
-  }
-
+  /** Every map of the game, in climbing order – whether it is on this device or not is not the player's concern. */
   private renderMaps() {
     const st = this.h.statuses();
-    const prog = this.h.installing();
-    const on = this.h.contentOnline();
     const rows = st.map((s) => {
-      let chip = '', btn = '';
-      const busy = prog?.id === s.id;
-      if (s.state === 'ready') {
-        chip = s.source === 'bundled' ? `Có sẵn trong app · v${s.version}` : `Đã tải · v${s.version}`;
-        if (s.source === 'pack') btn = `<button class="mini" data-m="remove" data-id="${s.id}">Xoá</button>`;
-        if (this.h.pendingRestart(s.id)) { chip = `Đã cập nhật v${s.version} – mở lại game để dùng`; btn = `<button class="mini on" data-m="restart">Mở lại</button>`; }
-      } else if (s.state === 'update') {
-        chip = `Có bản v${s.remote?.version} · ${mb(s.bytes)}`;
-        btn = `<button class="mini on" data-m="get" data-id="${s.id}">Cập nhật</button>`;
-      } else if (s.state === 'download') {
-        chip = `Chưa tải · ${mb(s.bytes)}`;
-        btn = `<button class="mini on" data-m="get" data-id="${s.id}">Tải về</button>`;
-      } else if (s.state === 'needs-app') chip = 'Cần cập nhật ứng dụng';
-      else if (s.state === 'needs-previous') chip = 'Cần tải map phía dưới trước';
-      if (busy) { btn = ''; chip = `Đang tải… ${Math.floor((prog!.done / Math.max(1, prog!.total)) * 100)}% (${prog!.filesDone}/${prog!.files} tệp)`; }
-      if ((s.state === 'download' || s.state === 'update') && on === false && !busy) btn = '';
-      const err = this.errors.get(s.id);
-      return `<div class="map-row ${s.state}">
-        <div class="mr-main"><div class="mr-name">${s.order}. ${esc(s.name)} <span class="mr-y">${Math.max(0, Math.round(s.yMin / 10) * 10)} m</span></div>
-        ${s.summary ? `<div class="mr-sum">${esc(s.summary)}</div>` : ''}
-        <div class="mr-chip">${chip}</div>
-        ${busy ? `<div class="mr-bar"><div style="width:${(prog!.done / Math.max(1, prog!.total)) * 100}%"></div></div>` : ''}
-        ${err ? `<div class="mr-err">${esc(err)} – map cũ vẫn giữ nguyên, thử lại sau.</div>` : ''}</div>
-        <div class="mr-act">${btn}</div></div>`;
+      const pr = this.h.progress(s.id);
+      let chip = '';
+      if (s.state === 'needs-app') chip = '<span class="mr-tag soon">Cần bản game mới</span>';
+      else if (pr.conquered) chip = `<span class="mr-tag ok">Đã chinh phục${pr.best ? ` · ${fmtTime(pr.best)}` : ''}</span>`;
+      return `<div class="map-row">
+        <div class="mr-no">${String(s.order).padStart(3, '0')}</div>
+        <div class="mr-main"><div class="mr-name">${esc(s.name)}</div>
+        ${s.summary ? `<div class="mr-sum">${esc(s.summary)}</div>` : ''}${chip}</div></div>`;
     }).join('');
-    const status = on === true ? `Trực tuyến · đã kiểm tra ${ago(this.h.checkedAt())}`
-      : on === false ? 'Ngoại tuyến – các map đã có trên máy vẫn chơi bình thường'
-        : 'Đang kiểm tra map mới…';
     this.mapsBox.innerHTML = `<div class="panel maps-panel"><h2>Bản đồ</h2>
       <div class="maps-list">${rows}</div>
-      <div class="maps-status"><span>${status}</span><button class="mini" data-m="check">Kiểm tra lại</button></div>
-      <div class="note">Tải một lần, chơi offline. Có mạng thì game tự báo map mới và bản cập nhật; bản cũ chỉ bị thay khi bản mới đã tải xong và kiểm tra đầy đủ.<span class="usage"></span></div>
       <div class="stack" style="margin-top:12px"><button class="btn" data-m="close">Xong</button></div></div>`;
-    this.mapsBox.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => b.addEventListener('click', () => {
-      this.h.click();
-      const a = b.dataset.m, id = b.dataset.id!;
-      if (a === 'close') this.mapsBox.classList.add('hidden');
-      else if (a === 'get') void this.install(id);
-      else if (a === 'remove') void this.h.remove(id).then(() => this.refresh());
-      else if (a === 'restart') this.h.restartApp();
-      else if (a === 'check') { b.disabled = true; void this.h.check().then(() => this.refresh()); }
-    }));
-    void this.h.usage().then((u) => {
-      const e = this.mapsBox.querySelector('.usage');
-      if (u && e && u.quota) e.textContent = ` Đang dùng ${mb(u.used)} bộ nhớ.`;
-    });
+    (this.mapsBox.querySelector('[data-m=close]') as HTMLButtonElement).addEventListener('click', () => { this.h.click(); this.mapsBox.classList.add('hidden'); });
   }
 
   // ---------------------------------------------------------------- achievements (Challenge)

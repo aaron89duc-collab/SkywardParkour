@@ -117,20 +117,27 @@ Rooftop City < 25 phút; map mới có thể tự đặt `challengeTime`), "Bư�
 ## Map online – Download Once, Play Offline, Update When Online
 
 - **Map 001** nằm sẵn trong app: chơi được ngay cả lần đầu mở khi chưa có mạng.
-- **Map 002, 003…** là các *gói map* trên Cloudflare R2: `manifest.json` + `files/<sha256>`. Người chơi tải một lần (menu **Bản đồ**,
-  hoặc thông báo "Có map mới" trên menu). Gói được lưu trên máy (IndexedDB), nên bật chế độ máy bay vẫn chơi Map 001 + 002 bình thường.
+- **Map 002, 003…** là các *gói map* trên Cloudflare R2: `manifest.json` + `files/<sha256>`. Gói được lưu trên máy (IndexedDB),
+  nên bật chế độ máy bay vẫn chơi Map 001 + 002 bình thường.
+- **Tự tải, người chơi không phải làm gì và không thấy gì** (`src/content/AutoSync.ts`): máy luôn giữ sẵn 3 map phía trên map xa nhất
+  đang chơi / đã chinh phục (đang chơi Map 001 → tải sẵn 002, 003, 004) và các bản cập nhật của chúng, tải ngầm từng map một.
+  Không có tiến độ, không có nút tải, không có tuỳ chọn. Thứ duy nhất hiện ra: khi còn thiếu map phía trước mà không có mạng, một ô cảnh báo
+  "Không có mạng – chưa tải được … · Bật mạng internet, game sẽ tự tải về" (menu: góc trái trên; khi chơi: dưới tên khu). Có mạng lại
+  (sự kiện online, mở lại app, hoặc tự thử lại mỗi 20 giây) → tự tải, cảnh báo tự tắt. Tải lỗi thì âm thầm thử lại sau 1 phút.
+  Menu **Bản đồ** chỉ liệt kê mọi map của game (kể cả map chưa có trên máy) với tên, mô tả và "Đã chinh phục"; không có trạng thái tải.
+  Kiểm chứng: `devtools/autosync.cjs`, `devtools/offline.cjs`.
 - **Khởi động không cần mạng**: game mở bằng dữ liệu đã có trên máy, không chờ server, không xác thực online.
-  Có mạng thì game đọc manifest ở nền (tối đa 6 giây), so phiên bản và báo map mới / bản cập nhật; người chơi chọn **Tải ngay** hoặc **Để sau**.
+  Có mạng thì game đọc manifest ở nền (tối đa 6 giây), so phiên bản rồi tự tải map / bản cập nhật cần thiết.
 - **Cập nhật từng phần**: mỗi tệp được đánh địa chỉ bằng mã SHA-256, nên sửa một map chỉ tải lại các tệp đã đổi (ví dụ sửa bố cục
   Map 002 = tải 27 KB thay vì 16 MB).
 - **An toàn**: mọi tệp tải về đều được kiểm tra kích thước + SHA-256. Map chỉ chuyển sang bản mới khi toàn bộ bản mới đã nằm trên máy và
   đúng mã; tới lúc đó mới xoá các tệp cũ không còn dùng. Tải hỏng hoặc bị ngắt thì bản cũ vẫn chơi được (và lần sau tải tiếp phần còn thiếu).
   Map đang được chơi giữ nguyên tới khi mở lại game.
 - **Cuối map an toàn**: mỗi map khai báo `exit.gate`, là chỗ map tiếp theo nối vào. Nếu map tiếp theo chưa có trên máy, chỗ đó bị chắn bằng
-  một bức tường năng lượng có biển báo ("Chưa có trên máy · Menu → Bản đồ để tải" / "Sắp ra mắt" / "Kết nối mạng để kiểm tra map mới").
+  một bức tường năng lượng có biển báo ("Sắp mở…" / "Bật mạng internet để mở đường này" / "Sắp ra mắt").
   Người chơi vẫn được công nhận đã chinh phục map. Tải map tiếp theo xong thì tường biến mất và lối đi mở ra. Các map phía dưới không bao giờ bị
   gỡ khỏi bộ nhớ, nên rơi luôn đáp xuống vật thật.
-- Map cần tính năng mới của app (`minApp` lớn hơn bản app đang dùng) sẽ hiện "Cần cập nhật ứng dụng" thay vì tải về.
+- Map cần tính năng mới của app (`minApp` lớn hơn bản app đang dùng) sẽ không tải; Bản đồ ghi "Cần bản game mới", biển ở cổng ghi "Cần bản game mới để mở đường này".
 - Bản web (Vercel / TWA) có service worker: sau lần mở đầu tiên, app (code, Map 001, nhân vật) mở được khi không có mạng.
   Bản Capacitor thì tự có sẵn file trong APK.
 
