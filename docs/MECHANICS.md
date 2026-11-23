@@ -95,3 +95,36 @@ piece. Rotation rules keep maps fresh:
   dividers between the halves, invisible boundary around the footprint).
 - Moving objects run in their own height band or lane; the clearance check must report 0 hits.
 - The exit gate opens only when the next map is in the world.
+
+## 5. Route design rule (every map from Map 004 on)
+A map is not one straight climb. Each map has:
+- **About 3 main routes** to the same goal – easy, medium, hard – that **cross each other often**, so a player can
+  climb half a zone the easy way and switch to the hard line where a connection is found (and back).
+- **Several hidden routes** (2–4 per map) that skip part of a zone or reward exploration.
+- **Discovery mechanics** that make players look around: pressure plates that open a way, gem portals (need N gems),
+  blinking platforms, fans / jellies that lift you somewhere unexpected, things that look solid but can be walked
+  through (a chocolate waterfall, a house door with an updraft inside), secret ledges behind scenery.
+- Every route – main, alternatives and secrets – is a route list in the builder (`B.mark(route, …)`) and is
+  **played by the physics bot** (`devtools/bot4.cjs`) before the map ships. The validator must still report no
+  shortcut that skips the intended sequence.
+
+Map 004 (Candy Kingdom) as the reference: per zone an easy (`zNeasy`) and a hard (`zNhard`) line next to the main
+route, plus secrets – `z2secret` (gingerbread house door → fan out of the chimney → hidden floats), `z4secret`
+(walk through the chocolate waterfall → updraft → past the rivers), `z7secret` (fan behind the corner tower →
+secret ledge with a gem) and the gem portal (5 gems → courtyard straight up to the spiral).
+
+## 6. Scenery and ambience (data only)
+- `atlas` = the map's own sprite atlas (logical path without extension, `.webp` + `.json`), built from the artist's
+  PNGs (`devtools/build-atlas004.mjs`). `sprites` = billboards `{ n, p, h }` from that atlas.
+- Optional sprite motion `mv` (older apps draw the sprite still):
+  `bob` (a m, s rad/s) · `orbit` (around p, r m, s rad/s, bob a) · `rise` (bubbles: span m at s m/s, then pop) ·
+  `drift` (clouds / balloons: span m along yaw d at s m/s, dissolving in and out at the ends). `ph` = phase.
+- `fx` `{ t: 'birds', p, r, n?, c? }` = a flock circling p (older apps ignore it).
+- Prefabs with `col: false` are walk-through decoration (bushes, the chocolate waterfall); invisible `wall` kit
+  pieces make a model solid only where it should be (the walk-in gingerbread house).
+
+## 7. Languages
+The game is English by default with Vietnamese (Settings → Language, kept on the device). UI text lives in
+`src/i18n.ts`. Map content keeps its Vietnamese base text and adds English siblings: zone `name_en`,
+`finishHint_en`, sign `m_en`, pack `summary_en` (map001's English zone names have `name_vi`). The builders add them
+through `devtools/i18n-content.mjs`; `node devtools/i18n-content.mjs` patches existing map files in place.

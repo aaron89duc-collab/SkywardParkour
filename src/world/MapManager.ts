@@ -34,6 +34,11 @@ export class MapManager {
   root = new THREE.Group();
   atlasTex: THREE.Texture | null = null;
   atlasRects: Record<string, AtlasRect> = {};
+  private atlases = new Map<string, Promise<{ tex: THREE.Texture; rects: Record<string, AtlasRect> }>>();
+  private atlas(path: string) {
+    if (!this.atlases.has(path)) this.atlases.set(path, Promise.all([this.assets.texture(`${path}.webp`), this.assets.json<Record<string, AtlasRect>>(`${path}.json`)]).then(([tex, rects]) => ({ tex, rects })));
+    return this.atlases.get(path)!;
+  }
   private ladderList: Ladder[] = [];
   private loading = new Map<string, Promise<MapData>>();
 
@@ -130,11 +135,12 @@ export class MapManager {
     group.name = entry.id;
 
     if (!this.atlasTex) {
-      const atlas = data.atlas ?? 'assets/sprites/map001_atlas';
-      const [tex, rects] = await Promise.all([this.assets.texture(`${atlas}.webp`), this.assets.json<Record<string, AtlasRect>>(`${atlas}.json`)]);
-      this.atlasTex = tex;
-      this.atlasRects = rects;
+      const a = await this.atlas('assets/sprites/map001_atlas');
+      this.atlasTex = a.tex;
+      this.atlasRects = a.rects;
     }
+    // a map can bring its own sprite atlas (Map 004's scenery); the shared one stays Map 001's
+    const own = data.atlas && data.atlas !== 'assets/sprites/map001_atlas' ? await this.atlas(data.atlas).catch(() => null) : null;
 
     // building footprints (for the painted city streets)
     const footprints: Footprint[] = [];
@@ -156,8 +162,8 @@ export class MapManager {
     group.add(prefabs.group);
 
     let sprites: SpriteSystem | null = null;
-    if (this.atlasTex) {
-      sprites = new SpriteSystem(this.atlasTex, this.atlasRects);
+    if (own || this.atlasTex) {
+      sprites = new SpriteSystem(own?.tex ?? this.atlasTex!, own?.rects ?? this.atlasRects);
       group.add(sprites.build(data.sprites));
     }
 
@@ -178,6 +184,7 @@ export class MapManager {
     for (const f of data.fx) {
       if (f.t === 'waterfall') this.fx.addWaterfall(f);
       else if (f.t === 'glow') this.fx.addGlow(new THREE.Vector3(...f.p), f.s, f.c);
+      else if (f.t === 'birds') this.fx.addFlock(new THREE.Vector3(...f.p), f.r, f.n ?? 6, f.r % 2 > 1 ? -1 : 1, f.c);
       else if (f.t === 'milestone' && this.atlasTex && this.atlasRects['gold_diamond_collectible']) this.fx.addMilestone(new THREE.Vector3(...f.p), f.h, this.atlasTex, this.atlasRects['gold_diamond_collectible']);
     }
 

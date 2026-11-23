@@ -1,11 +1,14 @@
 import './ui/style.css';
 import { Game } from './core/Game';
+import { t, applyDocLang } from './i18n';
+
+applyDocLang();
 
 const app = document.getElementById('app')!;
 const game = new Game(app);
 game.init().catch((err) => {
   console.error(err);
-  game.ui?.showError('Không thể tải game: ' + (err?.message ?? err) + '. Hãy tải lại trang.');
+  game.ui?.showError(t('load.error', { msg: String(err?.message ?? err) }));
 });
 
 // offline app shell for the web build (after the first visit the game opens without network).

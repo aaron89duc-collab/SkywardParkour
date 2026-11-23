@@ -247,7 +247,7 @@ export class MoverSystem {
       const src = lod0Mesh(g.scene);
       return src ? { geo: bakedGeometry(src), mat: src.material as THREE.Material } : null;
     };
-    const need = (pred: (d: MoverData) => boolean) => list.some(pred);
+    const need = (pred: (d: MoverData) => boolean) => list.some((d) => !d.model && pred(d)); // a mover with its own model needs no default
     const hover = need((d) => d.kind === 'hover' && (d.look ?? 'hover') === 'hover') ? await model(file('hover')) : null;
     const pallet = need((d) => d.kind === 'hover' && d.look === 'pallet') ? await model(file('pallet')) : null;
     const lift = need((d) => d.kind === 'hover' && d.look === 'lift') ? await model(file('lift')) : null;

@@ -17,6 +17,8 @@ export interface InstalledPack {
   hash: string;
   size: number;
   summary?: string;
+  /** English summary (the base `summary` is Vietnamese) */
+  summary_en?: string;
   requires: string[];
   /** logical game path -> [sha256, bytes] */
   files: Record<string, [string, number]>;

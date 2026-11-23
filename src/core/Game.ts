@@ -28,6 +28,7 @@ import { Leaderboard } from '../online/Leaderboard';
 import { OnlineUI } from '../ui/OnlineUI';
 import type { MenuInfo } from '../ui/UI';
 import { enterFullscreen, fullscreenSupported, isFullscreen, toggleFullscreen } from '../ui/Fullscreen';
+import { t, loc, onLang } from '../i18n';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'finished';
 type CharId = 'male' | 'female';
@@ -112,7 +113,7 @@ export class Game {
       onClick: () => { this.audio.init(); this.audio.click(); },
       onFullscreen: () => toggleFullscreen(),
       menuInfo: () => this.menuInfo(),
-      onAchievements: () => this.ui.online?.openAchievements(this.ach.list().map((d) => ({ title: d.title, desc: d.desc, at: this.save.challenge?.achievements[d.id] ?? null }))),
+      onAchievements: () => this.openAchievements(),
     }, this.isTouch);
     this.ui.bindSave(this.save, this.quality);
     this.assets.onProgress = (d, t) => this.ui.setLoading(t ? d / t : 0);
@@ -147,7 +148,7 @@ export class Game {
     this.fx.sparkles.setViewport(window.innerHeight);
 
     this.maps = new MapManager(this.assets, this.physics, this.scene, this.fx);
-    this.ui.setLoading(0.05, 'Đang dựng Starter Village…');
+    this.ui.setLoading(0.05, t('load.build', { name: 'Starter Village' }));
     // no network needed here: the app's own maps + whatever was downloaded before
     await this.content.init();
     this.assets.resolver = this.content.resolve;
@@ -164,7 +165,7 @@ export class Game {
     this.maps.collected = this.save.collected ?? [];
     this.player.spawnPoint.set(...this.map.spawn.p);
     this.player.spawnYaw = this.map.spawn.yaw;
-    this.ui.setLoading(0.9, 'Đang gọi nhân vật…');
+    this.ui.setLoading(0.9, t('load.character'));
     await Promise.all([this.loadCharacter('male'), this.loadCharacter('female')]);
     this.equip(this.charId);
     this.player.teleport(this.player.spawnPoint, this.player.spawnYaw);
@@ -193,10 +194,10 @@ export class Game {
         if (this.score.test) return;
         this.score.test = true;
         this.ui.setTestBadge(true);
-        this.ui.toast('Lượt TEST', 'Đã dùng chế độ admin: lượt này không lưu kỷ lục');
+        this.ui.toast(t('toast.test'), t('toast.testSub'));
       },
       toast: (a, b) => this.ui.toast(a, b ?? ''),
-      where: () => `${this.map.name}${this.lastZone ? ' · Khu ' + this.lastZone.id : ''} · ${this.player.state}`,
+      where: () => `${this.map.name}${this.lastZone ? ` · ${t('adm.zone')} ${this.lastZone.id}` : ''} · ${this.player.state}`,
       setGameInput: (on) => {
         this.adminPrompt = !on;
         this.input.enabled = on && this.state === 'playing';
@@ -449,7 +450,7 @@ export class Game {
         this.dynScale = 0.85;
         this.onResize();
         try { localStorage.setItem(Game.AUTOQ_KEY, lower); } catch { /* ignore */ }
-        this.ui.toast('Đã giảm chất lượng đồ hoạ', 'Để game chạy mượt hơn — đổi lại trong Cài đặt');
+        this.ui.toast(t('toast.lowerQ'), t('toast.lowerQSub'));
         this.ui.bindSave(this.save, this.quality);
         return;
       }
@@ -493,7 +494,7 @@ export class Game {
     this.audio.setVolume(this.save.settings.volume);
     this.ui.hideMenu();
     if (!this.maps.map(mapId)) {
-      this.ui.showLoading(`Đang dựng ${this.maps.entry(mapId)?.name ?? 'bản đồ'}…`);
+      this.ui.showLoading(t('load.build', { name: this.maps.entry(mapId)?.name ?? t('load.map') }));
       await this.loadOtherMaps(mapId);
       this.ui.hideLoading();
     }
@@ -506,7 +507,7 @@ export class Game {
     this.restart();
     this.state = 'playing';
     this.input.enabled = true;
-    if (!this.isTouch) this.ui.setHint('Nhấp chuột vào màn hình để điều khiển camera');
+    if (!this.isTouch) this.ui.setHint(t('hud.clickCam'));
   }
 
   restart() {
@@ -588,12 +589,15 @@ export class Game {
       }),
       lbEnabled: () => this.lb.enabled,
       board: (b: string) => this.lb.board(b),
-      boards: () => [{ id: 'height', label: 'Độ cao' }, ...this.content.statuses().map((s) => ({ id: `time:${s.id}`, label: s.name }))],
+      boards: () => [{ id: 'height', label: t('lb.height') }, ...this.content.statuses().map((s) => ({ id: `time:${s.id}`, label: s.name }))],
       profile: () => this.lb.profile,
       setName: (n: string) => this.lb.setName(n),
       click: () => this.audio.click(),
     };
     this.ui.online = new OnlineUI(this.container, host);
+    this.ui.online.reopenAchievements = () => this.openAchievements();
+    // a new language: gate signs follow at once (UI panels and the HUD redraw themselves)
+    onLang(() => this.syncGates());
     // back online: send waiting results (new maps: AutoSync listens by itself)
     window.addEventListener('online', () => { void this.lb.sync(); });
     // keep the next maps on the device without a tap or a message: up to 3 maps past the furthest one in play.
@@ -623,8 +627,8 @@ export class Game {
     let bestTime: MenuInfo['bestTime'] = null;
     const times = this.save.bestTimes ?? {};
     const top = Object.keys(times).filter((k) => times[k] > 0).sort((a, b) => this.orderOf(b) - this.orderOf(a))[0];
-    if (top) bestTime = { label: `Tốt nhất tới đỉnh ${nameOf(top)}`, value: times[top] };
-    else if (this.save.bestTime) bestTime = { label: `Tốt nhất tới đỉnh ${nameOf(this.firstMapId)}`, value: this.save.bestTime };
+    if (top) bestTime = { label: t('menu.bestTo', { name: nameOf(top) }), value: times[top] };
+    else if (this.save.bestTime) bestTime = { label: t('menu.bestTo', { name: nameOf(this.firstMapId) }), value: this.save.bestTime };
     const p = this.lb?.profile;
     const achList = this.ach?.list() ?? [];
     return {
@@ -634,9 +638,13 @@ export class Game {
     };
   }
 
+  private openAchievements() {
+    this.ui.online?.openAchievements(this.ach.list().map((d) => ({ title: d.title, desc: d.desc, at: this.save.challenge?.achievements[d.id] ?? null })));
+  }
+
   /** show newly unlocked achievements (one toast each, queued) */
   private announce(list: AchDef[]) {
-    list.forEach((d, i) => setTimeout(() => { this.ui.toast('Thành tích mới!', d.title, true, 3000); this.audio.chime(); }, 400 + i * 3200));
+    list.forEach((d, i) => setTimeout(() => { this.ui.toast(t('toast.newAch'), d.title, true, 3000); this.audio.chime(); }, 400 + i * 3200));
   }
 
   /** column position of any known map (on the device or only announced by the server) */
@@ -651,32 +659,32 @@ export class Game {
     const title = s?.name ?? fallback;
     // nothing about downloads: the next map comes by itself; offline the player is asked for internet
     let sub: string;
-    if (s?.state === 'needs-app') sub = 'Cần bản game mới để mở đường này';
-    else if (s && this.maps.map(id)) sub = 'Đang mở đường…';
-    else if (this.content.online === false) sub = s ? 'Bật mạng internet để mở đường này' : 'Bật mạng internet để kiểm tra map mới';
-    else if (s) sub = 'Sắp mở…';
-    else sub = 'Sắp ra mắt';
-    return { title, sub, html: `Cổng sang <b>${title}</b><br><span style="font-weight:400;font-size:13px">${sub}</span>` };
+    if (s?.state === 'needs-app') sub = t('gate.needsApp');
+    else if (s && this.maps.map(id)) sub = t('gate.opening');
+    else if (this.content.online === false) sub = s ? t('gate.offline') : t('gate.offlineCheck');
+    else if (s) sub = t('gate.soonOpen');
+    else sub = t('gate.soon');
+    return { title, sub, html: `${t('gate.to', { name: title })}<br><span style="font-weight:400;font-size:13px">${sub}</span>` };
   }
 
   /** close / open end-of-map gates after maps were added; announce a way that just opened */
   private syncGates() {
     const opened = this.maps.syncGates((id, fb) => this.nextInfo(id, fb));
-    if (this.state === 'playing') for (const id of opened) this.ui.toast('Cổng đã mở!', `Lối lên ${this.maps.entry(id)?.name ?? id} đã sẵn sàng`, true, 4000);
+    if (this.state === 'playing') for (const id of opened) this.ui.toast(t('gate.opened'), t('gate.openedSub', { name: this.maps.entry(id)?.name ?? id }), true, 4000);
   }
 
   private finish(md: MapData) {
     this.finishedMaps.add(md.id);
-    const t = this.score.playTime;
+    const tm = this.score.playTime;
     const test = this.score.test; // admin test run: no unlocks, no times, no completions
     const firstTime = !test && (!this.save.highestMap || this.orderOf(this.save.highestMap) < this.orderOf(md.id));
     if (!test && this.mode === 'challenge') {
       // Challenge: records + achievements only (a challenge run always starts at 0 m, so every time is a full climb)
       if (firstTime) this.save.highestMap = md.id;
       const ch = challengeOf(this.save);
-      if (!ch.bestTimes[md.id] || t < ch.bestTimes[md.id]) ch.bestTimes[md.id] = t;
+      if (!ch.bestTimes[md.id] || tm < ch.bestTimes[md.id]) ch.bestTimes[md.id] = tm;
       writeSave(this.save);
-      this.announce(this.ach.onFinish(md, t, this.firstMapId));
+      this.announce(this.ach.onFinish(md, tm, this.firstMapId));
       void this.lb.sync();
     } else if (!test) {
       if (firstTime) this.save.highestMap = md.id;
@@ -684,8 +692,8 @@ export class Game {
       const prevBest = this.save.bestTimes[md.id] ?? (md.id === 'map001' ? this.save.bestTime ?? undefined : undefined);
       // times count for full climbs only (a run started higher up does not set a from-the-ground time)
       const valid = md.id === this.firstMapId || this.startMap === this.firstMapId;
-      if (valid && (!prevBest || t < prevBest)) this.save.bestTimes[md.id] = t;
-      if (md.id === 'map001') { this.save.completions++; if (!this.save.bestTime || t < this.save.bestTime) this.save.bestTime = t; }
+      if (valid && (!prevBest || tm < prevBest)) this.save.bestTimes[md.id] = tm;
+      if (md.id === 'map001') { this.save.completions++; if (!this.save.bestTime || tm < this.save.bestTime) this.save.bestTime = tm; }
       writeSave(this.save);
       void this.lb.sync();
     }
@@ -694,7 +702,7 @@ export class Game {
     const next = this.maps.map(md.exit.next);
     if (next) {
       // seamless: no stopping – the gate leads straight on
-      this.ui.toast(`Chinh phục ${md.name}!`, `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')} · Đi qua cổng sang ${next.name}`, true, 4200);
+      this.ui.toast(t('fin.conquer', { name: md.name }), t('fin.through', { t: `${Math.floor(tm / 60)}:${String(Math.floor(tm % 60)).padStart(2, '0')}`, name: next.name }), true, 4200);
       return;
     }
     this.state = 'finished';
@@ -702,10 +710,10 @@ export class Game {
     this.input.releasePointer();
     // end of what is on this device: the gate stays closed (safe), the map still counts as conquered
     this.ui.showFinish({
-      title: `Chinh phục ${md.name}!`,
-      time: t, best: this.score.best, bestTime: (this.mode === 'challenge' ? challengeOf(this.save).bestTimes[md.id] : this.save.bestTimes?.[md.id]) ?? null, firstTime,
+      title: t('fin.conquer', { name: md.name }),
+      time: tm, best: this.score.best, bestTime: (this.mode === 'challenge' ? challengeOf(this.save).bestTimes[md.id] : this.save.bestTimes?.[md.id]) ?? null, firstTime,
       next: this.nextInfo(md.exit.next, md.exit.label).html,
-      hint: md.finishHint ?? 'Thử tìm đường tắt để về đích nhanh hơn!',
+      hint: loc(md, 'finishHint') ?? t('fin.hint'),
     }, () => { this.state = 'playing'; this.input.enabled = true; this.clock.getDelta(); }, () => { this.state = 'playing'; this.input.enabled = true; this.restart(); });
   }
 
@@ -782,11 +790,11 @@ export class Game {
       this.setHudMap(here);
       this.autoSync.kick(1500); // the window of maps kept ahead moves with the player
       void this.loadOtherMaps(); // ... and so does the window of maps in the world
-      if (fellBack) this.ui.toast(`Rơi xuống ${here.name}`, `Kỷ lục lượt này vẫn giữ: ${Math.floor(this.score.runMax)} m — leo lại thôi!`, false, 3600);
-      else if (here.id !== this.firstMapId) this.ui.toast(here.name, `Map ${here.id.slice(3)} · ${here.origin[1]}–${here.origin[1] + here.height} m`, true, 3200);
+      if (fellBack) this.ui.toast(t('toast.fellTo', { name: here.name }), t('toast.fellToSub', { m: Math.floor(this.score.runMax) }), false, 3600);
+      else if (here.id !== this.firstMapId) this.ui.toast(here.name, t('toast.mapInfo', { no: here.id.slice(3), y0: here.origin[1], y1: here.origin[1] + here.height }), true, 3200);
     }
     const height = this.player.feetY;
-    if (this.score.update(dt, height)) { this.ui.toast('Kỷ lục mới!', this.mode === 'challenge' ? 'Vượt kỷ lục Thử thách cũ' : 'Vượt kỷ lục cá nhân cũ', true); this.audio.chime(); }
+    if (this.score.update(dt, height)) { this.ui.toast(t('toast.record'), this.mode === 'challenge' ? t('toast.recordCh') : t('toast.recordPb'), true); this.audio.chime(); }
     if (this.mode === 'challenge' && !this.score.test && this.score.runMax > this.achMax + 0.5) {
       this.achMax = this.score.runMax;
       this.announce(this.ach.onHeight(this.score.runMax));
@@ -800,7 +808,7 @@ export class Game {
           const ms = this.fx.milestones.find((x) => Math.abs(x.y - m) < 0.1);
           if (ms) { ms.reached = true; this.fx.burst(ms.sprite.position.clone()); }
           const top = md.origin[1] + md.height;
-          this.ui.toast(`Mốc ${m} m!`, m >= top ? `Đỉnh ${md.name}` : 'Tiếp tục leo lên', true);
+          this.ui.toast(t('toast.milestone', { m }), m >= top ? t('toast.summit', { name: md.name }) : t('toast.keepClimbing'), true);
           this.audio.chime();
         }
       }
@@ -811,7 +819,7 @@ export class Game {
       const key = `${z.map.id}:${z.zone.id}`;
       if (!this.reachedZones.has(key)) {
         this.reachedZones.add(key);
-        if (!(z.map.id === this.firstMapId && z.zone === z.map.zones[0])) this.ui.toast(`Khu ${z.zone.id}`, z.zone.name);
+        if (!(z.map.id === this.firstMapId && z.zone === z.map.zones[0])) this.ui.toast(t('toast.zone', { id: z.zone.id }), loc(z.zone, 'name') ?? z.zone.name);
       }
       this.lastZone = z.zone;
     }
@@ -857,7 +865,7 @@ export class Game {
     if (this.hudTimer <= 0) {
       this.hudTimer = 0.1;
       this.ui.updateHUD({ current: this.score.current, runMax: this.score.runMax, best: this.score.best, time: this.score.playTime, zone: this.lastZone, fps: this.save.settings.showFps ? this.fpsAvg : undefined });
-      if (!this.isTouch) this.ui.setHint(this.input.pointerLocked ? null : 'Nhấp chuột vào màn hình để điều khiển camera');
+      if (!this.isTouch) this.ui.setHint(this.input.pointerLocked ? null : t('hud.clickCam'));
     }
   }
 
@@ -882,9 +890,9 @@ export class Game {
           this.save.slipTips = (this.save.slipTips ?? 0) + 1;
           writeSave(this.save);
           const msg = this.isTouch
-            ? 'Vừa hụt chân thì kéo cần ngược lại ngay để bám lại mép'
-            : 'Vừa hụt chân thì bấm phím ngược hướng ngay để bám lại mép';
-          setTimeout(() => this.ui.toast('Lỡ bước khỏi mép?', msg, false, 4600), 700);
+            ? t('toast.slippedTouch')
+            : t('toast.slippedKeys');
+          setTimeout(() => this.ui.toast(t('toast.slipped'), msg, false, 4600), 700);
         }
         this.slipAt = -99;
         const k = THREE.MathUtils.clamp(e.drop / 14, 0, 1);
@@ -918,10 +926,10 @@ export class Game {
         if (e.run && Math.random() < 0.35) this.fx.dust.emit(feet, 1, { speed: 0.6, up: 0.2, life: 0.45, size: 0.3 });
         break;
       case 'rescue':
-        this.ui.toast('Đã đưa về làng', 'Bạn rơi ra ngoài thế giới');
+        this.ui.toast(t('toast.backToVillage'), t('toast.outOfWorld'));
         break;
       case 'unstuck':
-        this.ui.toast('Đã thoát chỗ kẹt', 'Nhân vật được đưa ra ngoài công trình');
+        this.ui.toast(t('toast.unstuck'), t('toast.unstuckSub'));
         break;
       case 'pad':
         if (e.kind === 'jump') { this.audio.clank(); this.fx.sparkles.emit(feet.clone().add(new THREE.Vector3(0, 0.2, 0)), 22, { speed: 3.2, up: 1.2, life: 0.6, size: 0.3 }); this.haptic(12); }
@@ -952,7 +960,7 @@ export class Game {
         // the respawn point moves here (Adventure); Challenge runs always restart from the bottom
         if (this.mode !== 'challenge') { this.player.spawnPoint.copy(e.p); this.player.spawnYaw = e.yaw; }
         this.audio.chime();
-        this.ui.toast('Điểm hồi sinh', 'Rơi khỏi bản đồ sẽ quay lại đây', true, 2400);
+        this.ui.toast(t('toast.checkpoint'), t('toast.checkpointSub'), true, 2400);
         break;
       case 'collect': {
         const key = `${this.map?.id ?? 'map'}:${e.id}`;
@@ -962,7 +970,7 @@ export class Game {
         this.audio.chime();
         this.fx.sparkles.emit(this.player.pos.clone().add(new THREE.Vector3(0, 0.6, 0)), 26, { speed: 3.5, up: 2, life: 0.8, size: 0.35 });
         const n = list.filter((k) => k.startsWith(`${this.map?.id ?? 'map'}:`)).length;
-        this.ui.toast('Nhặt được ngọc', `${n} viên ở ${this.map?.name ?? 'map này'}`, true, 2000);
+        this.ui.toast(t('toast.gem'), t('toast.gemSub', { n, name: this.map?.name ?? t('toast.thisMap') }), true, 2000);
         break;
       }
       case 'ring':
@@ -974,7 +982,7 @@ export class Game {
         this.audio.clank();
         if (!this.ladderTipShown) {
           this.ladderTipShown = true;
-          this.ui.toast('Đang bám thang', this.isTouch ? 'Đẩy cần lên/xuống: leo · NHẢY: bật ra' : 'W/S: leo lên/xuống · Space: bật ra', false, 3800);
+          this.ui.toast(t('toast.ladder'), this.isTouch ? t('toast.ladderTouch') : t('toast.ladderKeys'), false, 3800);
         }
         break;
     }
@@ -989,8 +997,8 @@ export class Game {
     this.save.tips = n + 1;
     writeSave(this.save);
     const msg = this.isTouch
-      ? 'NHẢY: leo lên · Cần trái/phải: đi dọc mép · Kéo lùi + NHẢY: bật tường · Giữ kéo lùi: buông'
-      : 'Space: leo lên · A/D: đi dọc mép · S + Space: bật tường · Giữ S: buông';
-    this.ui.toast('Đang bám mép', msg, false, 4200);
+      ? t('toast.ledgeTouch')
+      : t('toast.ledgeKeys');
+    this.ui.toast(t('toast.ledge'), msg, false, 4200);
   }
 }

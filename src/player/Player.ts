@@ -70,6 +70,7 @@ type Move = {
 const FEET = PHYS.capsuleHalfHeight + PHYS.capsuleRadius; // capsule center -> feet
 const _feet = new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0);
+const EDGE_PROBES = [[0.27, 0], [-0.27, 0], [0, 0.27], [0, -0.27], [0.19, 0.19], [-0.19, 0.19], [0.19, -0.19], [-0.19, -0.19]];
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -502,7 +503,9 @@ export class Player {
       if (this.stepDist > stride && sp > 0.8 && this.state === 'ground') { this.stepDist = 0; this.events.push({ type: 'step', run: sp > 4.5 }); }
       // what are we standing on? (moving platform / pad)
       if (this.hooks) {
-        const g = this.physics.raycast(new THREE.Vector3(this.pos.x, this.feetY + 0.15, this.pos.z), DOWN, 0.5);
+        let g = this.physics.raycast(new THREE.Vector3(this.pos.x, this.feetY + 0.15, this.pos.z), DOWN, 0.5);
+        // standing on an edge (the body's centre already past it): look under the rim of the capsule too
+        for (const [ox, oz] of EDGE_PROBES) { if (g) break; g = this.physics.raycast(new THREE.Vector3(this.pos.x + ox, this.feetY + 0.15, this.pos.z + oz), DOWN, 0.5); }
         this.riding = this.hooks.moverOf(g?.collider);
         const surf = this.hooks.surfaceOf?.(g?.collider) ?? null;
         this.grip = surf?.grip ?? 1;
@@ -581,6 +584,7 @@ export class Player {
     o2.y = top;
     const down = physics.raycast(o2, DOWN, top - (feet + L.mantleMinRel) + 0.1);
     if (!down || down.distance < 0.04 || down.normal.y < 0.72) return null;
+    if (this.hooks?.surfaceOf?.(down.collider)?.bounce) return null; // a trampoline throws you off: no edge to hang from
     const ledgeY = down.point.y;
     const rel = ledgeY - feet;
     if (rel < L.mantleMinRel || rel > L.maxRel + sweep + extraRel) return null;

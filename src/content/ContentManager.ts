@@ -2,6 +2,7 @@ import { ContentStore, type ContentState, type InstalledPack, type RemoteManifes
 import { sha256Async } from '../systems/sha256';
 import type { MapRegistryEntry } from '../world/MapTypes';
 import { DEVICE_TYPES } from '../world/Devices';
+import { t, loc } from '../i18n';
 
 /**
  * Download Once – Play Offline – Update When Online.
@@ -39,7 +40,7 @@ export const MECHANICS = new Set([
 ]);
 export const supports = (m: { minApp?: number; mechanics?: string[] }) => (m.minApp ?? 1) <= APP_CONTENT_VERSION && (m.mechanics ?? []).every((x) => MECHANICS.has(x));
 
-export type BundledEntry = MapRegistryEntry & { order: number; bundled: true; version?: number; hash?: string; summary?: string };
+export type BundledEntry = MapRegistryEntry & { order: number; bundled: true; version?: number; hash?: string; summary?: string; summary_en?: string };
 
 export type MapStatus = {
   id: string;
@@ -243,7 +244,7 @@ export class ContentManager {
       else if (!s) state = 'download';
       else if (r && r.hash !== hash && r.version >= (version ?? 0)) state = 'update';
       if (s && !playable.has(id)) state = 'needs-previous';
-      out.push({ id, name, order, yMin, summary: r?.summary ?? (s?.kind === 'pack' ? s.p.summary ?? '' : s?.kind === 'bundled' ? s.b.summary ?? '' : ''), source: s?.kind ?? null, version, remote: r, state, bytes: r && (state === 'download' || state === 'update') ? this.missingBytes(r) : 0 });
+      out.push({ id, name, order, yMin, summary: (r ? loc(r, 'summary') : undefined) ?? (s?.kind === 'pack' ? loc(s.p, 'summary') ?? '' : s?.kind === 'bundled' ? loc(s.b, 'summary') ?? '' : ''), source: s?.kind ?? null, version, remote: r, state, bytes: r && (state === 'download' || state === 'update') ? this.missingBytes(r) : 0 });
     }
     return out.sort((a, b) => a.order - b.order);
   }
@@ -272,8 +273,8 @@ export class ContentManager {
 
   private async installNow(id: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
     const r = this.state.manifest?.maps.find((x) => x.id === id);
-    if (!r) throw new Error('Không tìm thấy map trên máy chủ');
-    if (!supports(r)) throw new Error('Cần cập nhật ứng dụng để chơi map này');
+    if (!r) throw new Error(t('err.notFound'));
+    if (!supports(r)) throw new Error(t('err.needsApp'));
     if (r.pack && !Object.keys(r.files ?? {}).length) r.files = await this.packFiles(r, signal);
     // already up to date (queued twice, or installed meanwhile)
     const have = this.source(id);
@@ -307,8 +308,8 @@ export class ContentManager {
               const res = await fetch(CONTENT_URL + 'files/' + h, { signal });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const buf = await res.arrayBuffer();
-              if (buf.byteLength !== size) throw new Error('kích thước sai');
-              if ((await sha256Async(buf)) !== h) throw new Error('mã kiểm tra sai');
+              if (buf.byteLength !== size) throw new Error(t('err.size'));
+              if ((await sha256Async(buf)) !== h) throw new Error(t('err.hash'));
               await this.store.putBlob(h, buf);
               this.present.add(h);
               prog.done += size;
@@ -327,7 +328,7 @@ export class ContentManager {
       // everything is on the device and verified: switch to the new version in a single write
       const rec: InstalledPack = {
         id, name: r.name, order: r.order, yMin: r.yMin, yMax: r.yMax, entry: r.entry, version: r.version, hash: r.hash,
-        size: r.size, summary: r.summary, requires: r.requires ?? [], files: r.files, installedAt: Date.now(),
+        size: r.size, summary: r.summary, ...(r.summary_en ? { summary_en: r.summary_en } : {}), requires: r.requires ?? [], files: r.files, installedAt: Date.now(),
       };
       const st = await this.store.getState();
       st.packs[id] = rec;
@@ -352,9 +353,9 @@ export class ContentManager {
         const res = await fetch(CONTENT_URL + 'files/' + r.pack, { signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = await res.arrayBuffer();
-        if ((await sha256Async(buf)) !== r.pack) throw new Error('mã kiểm tra sai');
+        if ((await sha256Async(buf)) !== r.pack) throw new Error(t('err.hash'));
         const pm = JSON.parse(new TextDecoder().decode(buf)) as { id: string; hash: string; files: Record<string, [string, number]> };
-        if (pm.id !== r.id || pm.hash !== r.hash) throw new Error('pack manifest không khớp');
+        if (pm.id !== r.id || pm.hash !== r.hash) throw new Error(t('err.manifest'));
         const st = this.state.manifest?.maps.find((x) => x.id === r.id);
         if (st) { st.files = pm.files; await this.store.setState(this.state).catch(() => {}); }
         return pm.files;

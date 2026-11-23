@@ -4,6 +4,7 @@
 // lands on the deck where the current zone started (never back down through several maps).
 // Run: node devtools/build-map003.mjs -> packs/map003/maps/map003.json (+ devtools/out/map003_plan.png, routes003.json)
 import fs from 'fs';
+import { applyI18n, applyPackI18n } from './i18n-content.mjs';
 import { MapBuilder, r2, makeWaypoints } from './mapgen/lib.mjs';
 import { plotMap } from './mapgen/plot.mjs';
 
@@ -678,6 +679,7 @@ const data = B.toJSON({
   prefabFiles: Object.fromEntries([...new Set(B.prefabs.map((p) => p.id))].map((id) => [id, `assets/map003/${id}`])),
   waypoints: makeWaypoints(B.routes, zones),
 });
+applyI18n(data);
 fs.writeFileSync(new URL('../packs/map003/maps/map003.json', import.meta.url), JSON.stringify(data));
 fs.writeFileSync(new URL('./out/routes003.json', import.meta.url), JSON.stringify(B.routes));
 // pack.json: ship only what the map uses (the folder may hold spare imports)
@@ -692,6 +694,7 @@ fs.writeFileSync(new URL('./out/routes003.json', import.meta.url), JSON.stringif
     summary: 'Cảng container trên mây · 320 → 520 m · 7 khu · thang nâng, xe treo, container đu đưa, cần cẩu xoay, bệ bật',
     include, ...(old.version ? { version: old.version, contentHash: old.contentHash } : {}),
   };
+  applyPackI18n('map003', meta);
   fs.writeFileSync(pf, JSON.stringify(meta, null, 1) + '\n');
   console.log(`pack.json: ${include.length} files`);
 }

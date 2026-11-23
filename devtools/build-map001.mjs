@@ -1,6 +1,7 @@
 // Map 001 – Starter Village. Hand-authored layout; connectors are deterministic.
 // Run: node devtools/build-map001.mjs  -> public/maps/map001.json (+ devtools/out/map001_plan.png)
 import fs from 'fs';
+import { applyI18n, applyPackI18n } from './i18n-content.mjs';
 import { MapBuilder, r2, makeWaypoints } from './mapgen/lib.mjs';
 import { plotMap } from './mapgen/plot.mjs';
 
@@ -413,6 +414,7 @@ const data = B.toJSON({
   },
   waypoints: makeWaypoints(B.routes, zones, { S1: 'S1 – đường tắt', S2: 'S2 – mái ẩn', S3: 'S3 – bậu cửa tháp kính' }),
 });
+applyI18n(data);
 fs.writeFileSync(new URL('../public/maps/map001.json', import.meta.url), JSON.stringify(data));
 fs.mkdirSync(new URL('./out/', import.meta.url), { recursive: true });
 fs.writeFileSync(new URL('./out/routes.json', import.meta.url), JSON.stringify(B.routes));

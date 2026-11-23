@@ -49,6 +49,7 @@
   "assets/map003/trolley_car.glb",
   "maps/map003.json"
  ],
- "version": 1,
- "contentHash": "849bef6c4c5f2b6aeaef3d9d5d1fe53e5ba11a634733f0211ff88759fb4cfd39"
+ "version": 2,
+ "contentHash": "a6074d31df9a3f1af6888abe11125fad50db13e09b0aac3e9556b7c314752a24",
+ "summary_en": "A container port in the clouds · 320 → 520 m · 7 zones · lifts, cable cars, swinging containers, rotating cranes, launch pads"
 }

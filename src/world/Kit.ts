@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { loc } from '../i18n';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { KitData } from './MapTypes';
 import * as T from './Textures';
@@ -423,9 +424,9 @@ export class KitBuilder {
         const c = new THREE.Vector3(px, py - h / 2, pz);
         this.boxPart('metal', w + 0.2, h + 0.2, 0.18, c, r, 2, solid);
         const fo = new THREE.Vector3(0, 0, 0.1).applyQuaternion(q);
-        this.push(this.mat(`sign_${d.m ?? 'ROOFTOP CITY|'}`), new THREE.PlaneGeometry(w, h), this.mtx(c.clone().add(fo), r).m);
+        this.push(this.mat(`sign_${loc(d, 'm') ?? 'ROOFTOP CITY|'}`), new THREE.PlaneGeometry(w, h), this.mtx(c.clone().add(fo), r).m);
         const back = new THREE.Vector3(0, 0, -0.1).applyQuaternion(q);
-        this.push(this.mat(`sign_${d.m ?? 'ROOFTOP CITY|'}`), new THREE.PlaneGeometry(w, h), this.mtx(c.clone().add(back), r + 180).m);
+        this.push(this.mat(`sign_${loc(d, 'm') ?? 'ROOFTOP CITY|'}`), new THREE.PlaneGeometry(w, h), this.mtx(c.clone().add(back), r + 180).m);
         break;
       }
       case 'rock': {

@@ -108,6 +108,7 @@ export function referencedFiles(d) {
   const bases = new Set();
   for (const b of Object.values(d.prefabFiles ?? {})) bases.add(b);
   for (const m of d.movers ?? []) {
+    if (m.model?.file) { bases.add(m.model.file); continue; } // its own look: no default model needed
     const look = m.kind === 'swing' ? 'swing' : m.kind === 'rotor' ? 'rotor' : m.kind === 'hover' ? m.look ?? 'hover' : null;
     if (look) bases.add(d.moverModels?.[look] ?? MOVER_MODELS[look]);
   }
@@ -147,7 +148,7 @@ export function catalogOf(packs) {
     generated: new Date().toISOString(),
     maps: packs.map((p) => ({
       id: p.id, name: p.meta.name, order: p.meta.order, yMin: p.meta.yMin, yMax: p.meta.yMax,
-      entry: p.meta.entry, minApp: p.meta.minApp ?? 1, requires: p.meta.requires ?? [], summary: p.meta.summary ?? '',
+      entry: p.meta.entry, minApp: p.meta.minApp ?? 1, requires: p.meta.requires ?? [], summary: p.meta.summary ?? '', ...(p.meta.summary_en ? { summary_en: p.meta.summary_en } : {}),
       bundled: !!p.meta.bundled, version: p.meta.version, hash: p.hash, size: p.size, files: Object.keys(p.files).length,
       pack: packManifestOf(p).sha, mechanics: mechanicsOf(entryData(p)),
     })),
@@ -161,7 +162,7 @@ export function manifestOf(packs) {
     generated: new Date().toISOString(),
     maps: packs.map((p) => ({
       id: p.id, name: p.meta.name, order: p.meta.order, yMin: p.meta.yMin, yMax: p.meta.yMax,
-      entry: p.meta.entry, minApp: p.meta.minApp ?? 1, requires: p.meta.requires ?? [], summary: p.meta.summary ?? '',
+      entry: p.meta.entry, minApp: p.meta.minApp ?? 1, requires: p.meta.requires ?? [], summary: p.meta.summary ?? '', ...(p.meta.summary_en ? { summary_en: p.meta.summary_en } : {}),
       bundled: !!p.meta.bundled, version: p.meta.version, hash: p.hash, size: p.size,
       files: Object.fromEntries(Object.entries(p.files).map(([r, f]) => [r, [f.hash, f.size]])),
     })),
@@ -197,7 +198,7 @@ export function build() {
   const idx = JSON.parse(fs.readFileSync(idxFile, 'utf8'));
   for (const m of manifest.maps.filter((m) => m.bundled)) {
     const e = idx.find((x) => x.id === m.id);
-    if (e) { e.version = m.version; e.hash = m.hash; if (m.summary) e.summary = m.summary; }
+    if (e) { e.version = m.version; e.hash = m.hash; if (m.summary) e.summary = m.summary; if (m.summary_en) e.summary_en = m.summary_en; }
   }
   fs.writeFileSync(idxFile, JSON.stringify(idx, null, 1) + '\n');
   for (const m of manifest.maps) console.log(`${m.id} v${m.version}${m.bundled ? ' (bundled in app)' : ''}: ${Object.keys(m.files).length} files, ${(m.size / 1048576).toFixed(1)} MB`);

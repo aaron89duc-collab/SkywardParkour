@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { t } from '../i18n';
 import { sha256Hex } from './sha256';
 import type { Player } from '../player/Player';
 import type { ThirdPersonCamera } from '../camera/ThirdPersonCamera';
@@ -78,13 +79,13 @@ export class Admin {
     this.panel = document.createElement('div');
     this.panel.className = 'admin-panel hidden';
     this.panel.innerHTML = `
-      <div class="ap-head"><b>ADMIN</b><span class="ap-pos"></span><button data-a="min" title="Thu gọn">–</button><button data-a="close" title="Đóng">×</button></div>
+      <div class="ap-head"><b>ADMIN</b><span class="ap-pos"></span><button data-a="min" title="${t('adm.min')}">–</button><button data-a="close" title="${t('adm.close')}">×</button></div>
       <div class="ap-body">
-        <div class="ap-row"><button data-a="fly" class="ap-main">Bay (F)</button><button data-a="ground">Đặt xuống (G)</button><button data-a="redo">Thả lại (T)</button></div>
-        <div class="ap-row"><select data-a="wp"></select><button data-a="go">Đi</button></div>
-        <div class="ap-row"><button data-a="mark">Lưu điểm (B)</button><button data-a="copy">Copy toạ độ</button><button data-a="speed">Tốc độ ×1</button></div>
-        <div class="ap-row ap-small"><button data-a="clear">Xoá điểm đã lưu</button><button data-a="lock">Khoá admin</button></div>
-        <div class="ap-help">Bay: WASD/cần · Space/LÊN · C/XUỐNG · Shift nhanh. F lần nữa = thả nhân vật chơi tiếp. Lượt có dùng admin là lượt TEST, không lưu kỷ lục.</div>
+        <div class="ap-row"><button data-a="fly" class="ap-main">${t('adm.fly')}</button><button data-a="ground">${t('adm.ground')}</button><button data-a="redo">${t('adm.redo')}</button></div>
+        <div class="ap-row"><select data-a="wp"></select><button data-a="go">${t('adm.go')}</button></div>
+        <div class="ap-row"><button data-a="mark">${t('adm.mark')}</button><button data-a="copy">${t('adm.copy')}</button><button data-a="speed">${t('adm.speed', { k: 1 })}</button></div>
+        <div class="ap-row ap-small"><button data-a="clear">${t('adm.clear')}</button><button data-a="lock">${t('adm.lock')}</button></div>
+        <div class="ap-help">${t('adm.help')}</div>
       </div>`;
     parent.appendChild(this.panel);
     this.posEl = this.panel.querySelector('.ap-pos') as HTMLSpanElement;
@@ -101,7 +102,7 @@ export class Admin {
     on('mark', () => this.saveMark());
     on('copy', () => this.copyPos());
     on('speed', () => { this.fast = !this.fast; this.refresh(); });
-    on('clear', () => { this.marks = []; store.set(MARKS_KEY, '[]'); this.fillWaypoints(); this.h.toast('Đã xoá các điểm đã lưu'); });
+    on('clear', () => { this.marks = []; store.set(MARKS_KEY, '[]'); this.fillWaypoints(); this.h.toast(t('adm.cleared')); });
     on('lock', () => this.lock());
     // a tap on the minimised header expands it again
     (this.panel.querySelector('.ap-head') as HTMLElement).addEventListener('click', () => { if (this.minimized) { this.minimized = false; this.refresh(); } });
@@ -111,10 +112,10 @@ export class Admin {
     this.prompt = document.createElement('div');
     this.prompt.className = 'overlay admin-prompt hidden';
     this.prompt.innerHTML = `<div class="panel"><h2>Admin</h2>
-      <input type="password" autocomplete="current-password" placeholder="Mật khẩu admin" class="ap-input">
-      <label class="ap-remember"><input type="checkbox" checked> Ghi nhớ trên thiết bị này</label>
+      <input type="password" autocomplete="current-password" placeholder="${t('adm.password')}" class="ap-input">
+      <label class="ap-remember"><input type="checkbox" checked> ${t('adm.remember')}</label>
       <div class="ap-err"></div>
-      <div class="row"><button class="btn secondary" data-a="cancel">Huỷ</button><button class="btn" data-a="ok">Mở khoá</button></div></div>`;
+      <div class="row"><button class="btn secondary" data-a="cancel">${t('common.cancel')}</button><button class="btn" data-a="ok">${t('adm.unlock')}</button></div></div>`;
     parent.appendChild(this.prompt);
     const input = this.prompt.querySelector('.ap-input') as HTMLInputElement;
     const submit = () => this.tryPassword(input.value, (this.prompt.querySelector('.ap-remember input') as HTMLInputElement).checked);
@@ -152,7 +153,7 @@ export class Admin {
   /** Secret shortcut: unlocked -> show/hide the panel; locked -> password prompt. */
   private summon() {
     if (!this.h.isPlaying() || !this.pcOnly) return;
-    if (!this.h.allowed()) { this.h.toast('Admin không dùng trong Thử thách', 'Chế độ Thử thách không có dịch chuyển'); return; }
+    if (!this.h.allowed()) { this.h.toast(t('adm.noChallenge'), t('adm.noChallengeSub')); return; }
     if (this.unlocked) { this.open = !this.open || this.minimized; this.minimized = false; this.refresh(); return; }
     this.h.setGameInput(false);
     this.h.input.releasePointer();
@@ -171,7 +172,7 @@ export class Admin {
 
   private tryPassword(pw: string, remember: boolean) {
     if (sha256Hex(SALT + pw) !== HASH) {
-      (this.prompt.querySelector('.ap-err') as HTMLElement).textContent = 'Sai mật khẩu';
+      (this.prompt.querySelector('.ap-err') as HTMLElement).textContent = t('adm.wrong');
       return;
     }
     this.unlocked = true;
@@ -179,7 +180,7 @@ export class Admin {
     this.closePrompt();
     this.open = true;
     this.refresh();
-    this.h.toast('Đã mở chế độ admin', 'F: bay / thả · G: đặt xuống · T: thả lại · B: lưu điểm');
+    this.h.toast(t('adm.on'), t('adm.onSub'));
   }
 
   private lock() {
@@ -188,7 +189,7 @@ export class Admin {
     this.unlocked = this.pcOnly && import.meta.env.DEV;
     this.open = false;
     this.refresh();
-    this.h.toast('Đã khoá chế độ admin');
+    this.h.toast(t('adm.off'));
   }
 
   // ------------------------------------------------------------------ actions
@@ -228,13 +229,13 @@ export class Admin {
     const P = this.h.player;
     const from = new THREE.Vector3(P.pos.x, P.pos.y - FEET + 0.3, P.pos.z);
     const hit = this.h.physics.raycast(from, new THREE.Vector3(0, -1, 0), 600);
-    if (!hit) { this.h.toast('Không có mặt đất bên dưới'); return; }
+    if (!hit) { this.h.toast(t('adm.noGround')); return; }
     this.drop(hit.point.clone().add(new THREE.Vector3(0, 0.05, 0)));
   }
 
   private dropAgain() {
     if (!this.unlocked) return;
-    if (!this.lastDrop) { this.h.toast('Chưa có điểm thả', 'Bay tới một chỗ rồi bấm F để thả'); return; }
+    if (!this.lastDrop) { this.h.toast(t('adm.noDrop'), t('adm.noDropSub')); return; }
     this.drop(this.lastDrop.p.clone(), this.lastDrop.yaw);
   }
 
@@ -245,38 +246,38 @@ export class Admin {
     const [x, y, z] = v.split(',').map(Number);
     // waypoints are standable route points: arrive standing there, ready to try the next jump
     this.drop(new THREE.Vector3(x, y + 0.1, z));
-    this.h.toast('Dịch chuyển', this.select.selectedOptions[0]?.textContent ?? '');
+    this.h.toast(t('adm.teleport'), this.select.selectedOptions[0]?.textContent ?? '');
   }
 
   private saveMark() {
     if (!this.unlocked) return;
     const P = this.h.player;
     const p: [number, number, number] = [P.pos.x, P.pos.y - FEET, P.pos.z].map((v) => Math.round(v * 100) / 100) as [number, number, number];
-    const label = `Điểm ${this.marks.length + 1} · ${Math.round(p[1])} m`;
+    const label = t('adm.point', { n: this.marks.length + 1, y: Math.round(p[1]) });
     this.marks.push({ label, p });
     store.set(MARKS_KEY, JSON.stringify(this.marks));
     this.fillWaypoints();
     this.select.value = p.join(',');
-    this.h.toast('Đã lưu điểm', `${label} (${p.join(', ')})`);
+    this.h.toast(t('adm.saved'), `${label} (${p.join(', ')})`);
   }
 
   private copyPos() {
     if (!this.unlocked) return;
     const P = this.h.player;
     const s = [P.pos.x, P.pos.y - FEET, P.pos.z].map((v) => v.toFixed(2)).join(', ');
-    const done = () => this.h.toast('Đã copy toạ độ', s);
-    try { navigator.clipboard.writeText(s).then(done, () => this.h.toast('Toạ độ', s)); } catch { this.h.toast('Toạ độ', s); }
+    const done = () => this.h.toast(t('adm.copied'), s);
+    try { navigator.clipboard.writeText(s).then(done, () => this.h.toast(t('adm.coords'), s)); } catch { this.h.toast(t('adm.coords'), s); }
   }
 
   private fillWaypoints() {
     const opt = (label: string, p: number[]) => `<option value="${p.join(',')}">${label}</option>`;
-    let html = '<option value="">— Dịch chuyển tới… —</option>';
+    let html = `<option value="">${t('adm.goto')}</option>`;
     for (const m of this.h.maps.loaded.values()) {
       const wps = m.data.waypoints ?? [];
       if (!wps.length) continue;
       html += `<optgroup label="${m.data.name}">${wps.map((w) => opt(w.label, w.p)).join('')}</optgroup>`;
     }
-    if (this.marks.length) html += `<optgroup label="Điểm đã lưu">${this.marks.map((m) => opt(m.label, m.p)).join('')}</optgroup>`;
+    if (this.marks.length) html += `<optgroup label="${t('adm.marks')}">${this.marks.map((m) => opt(m.label, m.p)).join('')}</optgroup>`;
     this.select.innerHTML = html;
   }
 
@@ -323,8 +324,8 @@ export class Admin {
 
   private refresh() {
     this.panel.classList.toggle('min', this.minimized);
-    this.flyBtn.textContent = this.flying ? 'Thả xuống (F)' : 'Bay (F)';
+    this.flyBtn.textContent = this.flying ? t('adm.drop') : t('adm.fly');
     this.flyBtn.classList.toggle('on', this.flying);
-    this.speedBtn.textContent = this.fast ? 'Tốc độ ×3' : 'Tốc độ ×1';
+    this.speedBtn.textContent = t('adm.speed', { k: this.fast ? 3 : 1 });
   }
 }

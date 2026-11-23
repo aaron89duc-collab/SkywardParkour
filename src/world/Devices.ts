@@ -32,6 +32,8 @@ export interface DeviceData {
   phase?: number;
   /** optional look: GLB (logical path, no .glb) scaled by `s`, offset in model units; replaces the built-in look */
   model?: { file: string; s?: number; off?: V3; yaw?: number };
+  /** optional colour of the built-in look (a map's palette: candy pink belts, mint fans ...); older apps ignore it */
+  color?: string;
   // per type
   delay?: number; respawn?: number; // crumble
   on?: number; off?: number; // blink, fan
@@ -47,6 +49,7 @@ export interface DeviceData {
   rb?: number; // portal exit yaw
   target?: string; hold?: number; // plate -> device id it drives (piston / elevator), seconds it stays on
   pitch?: number; v?: number; // cannon
+  need?: number; // portal: opens only once this many pickups (collectible) of the map are collected; older apps: always open
   fall?: number; interval?: number; // drop
   g?: number; // lowgrav gravity scale
 }
@@ -133,6 +136,7 @@ export class DeviceSystem {
     const beltMat = new THREE.MeshStandardMaterial({ map: belt, color: '#5a5f66', roughness: 0.8 });
     this.beltTex = belt;
     const cable = new THREE.MeshStandardMaterial({ color: '#2b2d31', roughness: 0.6, metalness: 0.5 });
+    const candy = (color: string, rough = 0.4) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0 });
     const models = new Map<string, { geo: THREE.BufferGeometry; mat: THREE.Material } | null>();
     const model = async (file: string) => {
       if (!models.has(file)) {
@@ -187,7 +191,8 @@ export class DeviceSystem {
         case 'plate': {
           const th = d.t === 'plate' ? 0.15 : h;
           if (look) {
-            const mat = d.t === 'crumble' ? [tex.metal, tex.metal, tex.hazard, tex.grate, tex.metal, tex.metal]
+            const mat = d.color ? (d.t === 'conveyor' ? new THREE.MeshStandardMaterial({ map: belt, color: d.color, roughness: 0.35 }) : d.t === 'blink' || d.t === 'trampoline' || d.t === 'plate' ? glow(d.color, 0.35) : candy(d.color, d.t === 'slippery' ? 0.06 : 0.4))
+              : d.t === 'crumble' ? [tex.metal, tex.metal, tex.hazard, tex.grate, tex.metal, tex.metal]
               : d.t === 'blink' ? glow('#58d6ff', 0.6) : d.t === 'oneway' ? tex.grate : d.t === 'slippery' ? ice
                 : d.t === 'trampoline' ? glow('#ff4fa3', 0.35) : d.t === 'conveyor' ? beltMat : glow('#ffd166', 0.5);
             inner.add(box(w, th, dd, mat));
@@ -198,7 +203,7 @@ export class DeviceSystem {
           break;
         }
         case 'tilt': {
-          if (look) { inner.add(box(w, h, dd, [tex.metal, tex.metal, tex.grate, tex.metal, tex.hazard, tex.hazard])); const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, w * 0.6, 12), tex.yellow); pivot.rotation.z = Math.PI / 2; pivot.position.y = -h - 0.2; inner.add(pivot); }
+          if (look) { inner.add(box(w, h, dd, d.color ? candy(d.color) : [tex.metal, tex.metal, tex.grate, tex.metal, tex.hazard, tex.hazard])); const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, w * 0.6, 12), tex.yellow); pivot.rotation.z = Math.PI / 2; pivot.position.y = -h - 0.2; inner.add(pivot); }
           solid(new THREE.Vector3(w / 2, h / 2, dd / 2), new THREE.Vector3(0, -h / 2, 0));
           break;
         }
@@ -219,7 +224,7 @@ export class DeviceSystem {
         }
         case 'piston':
         case 'elevator': {
-          if (look) inner.add(box(w, h, dd, d.t === 'piston' ? [tex.hazard, tex.hazard, tex.metal, tex.metal, tex.hazard, tex.hazard] : [tex.metal, tex.metal, tex.grate, tex.metal, tex.yellow, tex.yellow]));
+          if (look) inner.add(box(w, h, dd, d.color ? candy(d.color) : d.t === 'piston' ? [tex.hazard, tex.hazard, tex.metal, tex.metal, tex.hazard, tex.hazard] : [tex.metal, tex.metal, tex.grate, tex.metal, tex.yellow, tex.yellow]));
           solid(new THREE.Vector3(w / 2, h / 2, dd / 2), new THREE.Vector3(0, -h / 2, 0));
           if (d.t === 'piston' && look) { const rod = box(0.35, 0.35, d.stroke ?? 3, tex.metal, -h / 2); rod.position.z = -(d.stroke ?? 3) / 2 - dd / 2; inner.add(rod); }
           break;
@@ -228,9 +233,9 @@ export class DeviceSystem {
           const L = d.radius ?? 4, arms = d.arms ?? 1;
           dv.rotates = true;
           if (look) {
-            const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.6, 0.9, 14), tex.yellow); hub.position.y = 0.45; inner.add(hub);
+            const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.6, 0.9, 14), d.color ? candy('#ffffff', 0.3) : tex.yellow); hub.position.y = 0.45; inner.add(hub);
             for (let i = 0; i < arms; i++) {
-              const arm = box(0.32, 0.32, L, [tex.hazard, tex.hazard, tex.hazard, tex.hazard, tex.metal, tex.metal], 0.7);
+              const arm = box(0.32, 0.32, L, d.color ? candy(d.color, 0.3) : [tex.hazard, tex.hazard, tex.hazard, tex.hazard, tex.metal, tex.metal], 0.7);
               arm.position.z = L / 2; const pivot = new THREE.Group(); pivot.rotation.y = (i / arms) * Math.PI * 2; pivot.add(arm); inner.add(pivot);
             }
           }
@@ -238,10 +243,10 @@ export class DeviceSystem {
         }
         case 'fan': {
           if (look) {
-            const frame = new THREE.Mesh(new THREE.CylinderGeometry(Math.min(w, dd) / 2, Math.min(w, dd) / 2, 0.4, 24, 1, true), tex.yellow);
+            const frame = new THREE.Mesh(new THREE.CylinderGeometry(Math.min(w, dd) / 2, Math.min(w, dd) / 2, 0.4, 24, 1, true), d.color ? candy(d.color) : tex.yellow);
             frame.position.y = 0.2; inner.add(frame);
             const blades = new THREE.Group();
-            for (let i = 0; i < 3; i++) { const bl = box(Math.min(w, dd) * 0.45, 0.05, 0.4, tex.metal, 0.25); bl.position.x = Math.min(w, dd) * 0.22; const g = new THREE.Group(); g.rotation.y = (i * Math.PI * 2) / 3; g.add(bl); blades.add(g); }
+            for (let i = 0; i < 3; i++) { const bl = box(Math.min(w, dd) * 0.45, 0.05, 0.4, d.color ? candy(i % 2 ? '#ffffff' : d.color, 0.3) : tex.metal, 0.25); bl.position.x = Math.min(w, dd) * 0.22; const g = new THREE.Group(); g.rotation.y = (i * Math.PI * 2) / 3; g.add(bl); blades.add(g); }
             inner.add(blades);
             (dv as unknown as { blades: THREE.Group }).blades = blades;
             const air = new THREE.Mesh(new THREE.CylinderGeometry(Math.min(w, dd) / 2, Math.min(w, dd) / 2, h, 20, 1, true), new THREE.MeshBasicMaterial({ color: '#cfefff', transparent: true, opacity: 0.08, depthWrite: false, side: THREE.DoubleSide }));
@@ -261,13 +266,13 @@ export class DeviceSystem {
           c.position.copy(a).add(b).multiplyScalar(0.5).sub(a);
           c.quaternion.setFromUnitVectors(Y, b.clone().sub(a).normalize());
           inner.add(c);
-          for (const e of [new THREE.Vector3(), b.clone().sub(a)]) { const post = box(0.3, 3, 0.3, tex.yellow, e.y - 1.5 + 0.3); post.position.x = e.x; post.position.z = e.z; inner.add(post); }
+          for (const e of [new THREE.Vector3(), b.clone().sub(a)]) { const post = box(0.3, 3, 0.3, d.color ? candy(d.color, 0.3) : tex.yellow, e.y - 1.5 + 0.3); post.position.x = e.x; post.position.z = e.z; inner.add(post); }
           dv.q.identity();
           break;
         }
         case 'cannon': {
           if (look) {
-            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.05, 2.4, 18, 1, true), new THREE.MeshStandardMaterial({ map: CT.metalTex(9, 0, 0, 22), roughness: 0.45, metalness: 0.6, side: THREE.DoubleSide }));
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.05, 2.4, 18, 1, true), d.color ? new THREE.MeshStandardMaterial({ color: d.color, roughness: 0.35, side: THREE.DoubleSide }) : new THREE.MeshStandardMaterial({ map: CT.metalTex(9, 0, 0, 22), roughness: 0.45, metalness: 0.6, side: THREE.DoubleSide }));
             barrel.rotation.x = Math.PI / 2 - (d.pitch ?? 45) * D2R; barrel.position.y = 0.9; inner.add(barrel);
             const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.12, 8, 24), glow('#ff9a1f', 1.2)); ring.position.y = 0.1; ring.rotation.x = Math.PI / 2; inner.add(ring);
           }
@@ -278,30 +283,33 @@ export class DeviceSystem {
           const k = 3;
           for (let i = 0; i < k; i++) {
             const g = new THREE.Group();
-            if (look) g.add(box(w, h, dd, [tex.yellow, tex.yellow, tex.hazard, tex.metal, tex.yellow, tex.yellow]));
+            if (look) g.add(box(w, h, dd, d.color ? candy(d.color, 0.3) : [tex.yellow, tex.yellow, tex.hazard, tex.metal, tex.yellow, tex.yellow]));
             inner.add(g);
             solid(new THREE.Vector3(w / 2, h / 2, dd / 2), new THREE.Vector3(0, -h / 2, 0));
           }
           break;
         }
         case 'portal': {
+          const discs: THREE.Mesh[] = [];
           for (const [p, r] of [[d.p, d.r ?? 0], [d.b ?? d.p, d.rb ?? 0]] as [V3, number][]) {
-            const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.14, 10, 32), glow('#7d5cff', 1.8));
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.14, 10, 32), glow(d.color ?? '#7d5cff', 1.8));
             ring.position.set(p[0] - d.p[0], p[1] - d.p[1] + 1.3, p[2] - d.p[2]); ring.rotation.y = r * D2R; inner.add(ring);
             const disc = new THREE.Mesh(new THREE.CircleGeometry(1.1, 28), new THREE.MeshBasicMaterial({ color: '#a891ff', transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
             disc.position.copy(ring.position); disc.rotation.y = r * D2R; inner.add(disc);
+            discs.push(disc);
           }
+          (dv as unknown as { discs: THREE.Mesh[] }).discs = discs;
           dv.q.identity();
           break;
         }
         case 'checkpoint': {
           const pole = box(0.12, 2.6, 0.12, tex.metal, 1.3); inner.add(pole);
-          const flag = box(0.04, 0.7, 1.1, glow('#3ddc84', 0.6), 2.25); flag.position.z = 0.55; inner.add(flag);
+          const flag = box(0.04, 0.7, 1.1, glow(d.color ?? '#3ddc84', 0.6), 2.25); flag.position.z = 0.55; inner.add(flag);
           (dv as unknown as { flag: THREE.Mesh }).flag = flag;
           break;
         }
         case 'collectible': {
-          const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.4), glow('#ffd23f', 1.6));
+          const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.4), glow(d.color ?? '#ffd23f', 1.6));
           gem.position.y = 1.0; inner.add(gem);
           (dv as unknown as { gem: THREE.Mesh }).gem = gem;
           break;
@@ -436,6 +444,7 @@ export class DeviceSystem {
     for (const dv of this.list) {
       const d = dv.d, id = dv.data.id;
       if (d.t === 'portal') {
+        if (d.need && this.collectedCount() < d.need) continue; // locked: not enough pickups yet
         const a = dv.base;
         if (Math.hypot(p.x - a.x, p.z - a.z) < 1.0 && p.y > a.y - 0.3 && p.y < a.y + 2.4) {
           const b = new THREE.Vector3(...(d.b ?? d.p));
@@ -472,6 +481,9 @@ export class DeviceSystem {
     }
     return null;
   }
+
+  /** pickups (collectible) of this map collected so far */
+  collectedCount() { let n = 0; for (const id of this.used) if (this.byId.get(id)?.d.t === 'collectible') n++; return n; }
 
   /** a pickup collected in an earlier session stays collected */
   markCollected(ids: Iterable<string>) {
@@ -600,6 +612,7 @@ export class DeviceSystem {
           continue;
         }
         case 'cannon': dv.stT = Math.max(0, dv.stT - dt); continue;
+        case 'portal': { const ds = (dv as unknown as { discs?: THREE.Mesh[] }).discs; if (ds && d.need) { const open = this.collectedCount() >= d.need; for (const m of ds) m.visible = open; } continue; }
         case 'collectible': { const gem = (dv as unknown as { gem?: THREE.Mesh }).gem; if (gem) { gem.rotation.y = t * 2.2; gem.position.y = 1.0 + Math.sin(t * 2.4) * 0.12; } continue; }
         default: continue;
       }

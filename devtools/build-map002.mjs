@@ -2,6 +2,7 @@
 // Hand-authored: real buildings, rooftops, fire escapes, balconies, a working crane, billboards, a glass tower crown.
 // Run: node devtools/build-map002.mjs -> packs/map002/maps/map002.json (downloadable pack) (+ devtools/out/map002_plan.png, routes002.json)
 import fs from 'fs';
+import { applyI18n, applyPackI18n } from './i18n-content.mjs';
 import { MapBuilder, r2, makeWaypoints } from './mapgen/lib.mjs';
 import { plotMap } from './mapgen/plot.mjs';
 
@@ -692,6 +693,7 @@ const data = B.toJSON({
   movers, pads, rings, ladders,
   waypoints: makeWaypoints(B.routes, zones, { hidden: 'Ban công ẩn (Challenge C)', S1: 'S1 – ống gió (Impossible Jump)', S2: 'S2 – đường tắt cần cẩu', S3: 'S3 – mặt tháp', detour: 'Đường vòng hẻm' }),
 });
+applyI18n(data);
 fs.writeFileSync(new URL('../packs/map002/maps/map002.json', import.meta.url), JSON.stringify(data));
 fs.mkdirSync(new URL('./out/', import.meta.url), { recursive: true });
 fs.writeFileSync(new URL('./out/routes002.json', import.meta.url), JSON.stringify(B.routes));

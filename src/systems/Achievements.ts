@@ -1,5 +1,6 @@
 import type { MapData } from '../world/MapTypes';
 import { challengeOf, writeSave, type SaveData } from './Score';
+import { t } from '../i18n';
 
 /**
  * Challenge-mode achievements. Kept forever (with records); never anything about a run in progress.
@@ -22,15 +23,15 @@ export class Achievements {
     const maps = this.maps();
     const out: AchDef[] = [];
     const heights = [...new Set(maps.flatMap((m) => m.milestones))].sort((a, b) => a - b);
-    for (const h of heights) out.push({ id: `h:${h}`, title: `Chạm ${h} m`, desc: `Leo tới ${h} m trong một lượt Thử thách` });
+    for (const h of heights) out.push({ id: `h:${h}`, title: t('ach.height', { h }), desc: t('ach.heightDesc', { h }) });
     for (const m of maps) {
-      out.push({ id: `top:${m.id}`, title: `Chinh phục ${m.name}`, desc: `Tới cổng đích ${m.name} ở chế độ Thử thách` });
+      out.push({ id: `top:${m.id}`, title: t('ach.top', { name: m.name }), desc: t('ach.topDesc', { name: m.name }) });
       const fast = (m as MapData & { challengeTime?: number }).challengeTime ?? FAST[m.id];
-      if (fast) out.push({ id: `fast:${m.id}`, title: `Thần tốc – ${m.name}`, desc: `Từ 0 m tới đích ${m.name} dưới ${Math.round(fast / 60)} phút` });
+      if (fast) out.push({ id: `fast:${m.id}`, title: t('ach.fast', { name: m.name }), desc: t('ach.fastDesc', { name: m.name, min: Math.round(fast / 60) }) });
     }
-    if (maps[0]) out.push({ id: 'steady', title: 'Bước chân vững vàng', desc: `Chinh phục ${maps[0].name} mà không rơi lần nào quá 10 m` });
-    out.push({ id: 'fall50', title: 'Cú rơi để đời', desc: 'Rơi một mạch hơn 50 m (và vẫn chơi tiếp)' });
-    out.push({ id: 'comeback', title: 'Không bỏ cuộc', desc: 'Trong một lượt: rơi tổng cộng hơn 100 m rồi vẫn leo cao hơn trước đó' });
+    if (maps[0]) out.push({ id: 'steady', title: t('ach.steady'), desc: t('ach.steadyDesc', { name: maps[0].name }) });
+    out.push({ id: 'fall50', title: t('ach.fall50'), desc: t('ach.fall50Desc') });
+    out.push({ id: 'comeback', title: t('ach.comeback'), desc: t('ach.comebackDesc') });
     return out;
   }
 

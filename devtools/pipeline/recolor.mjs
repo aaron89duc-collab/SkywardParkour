@@ -1,5 +1,6 @@
 // Colour variants of a vertex-coloured prefab: every strongly blue vertex gets the target hue (shading kept).
 // Usage: node devtools/pipeline/recolor.mjs <in.glb> <out.glb> <hueDeg> [valueMul=1] [satMul=1]
+//   SHIFT=1: rotate the hue of EVERY coloured vertex by hueDeg instead (candy colour variants of any model)
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { meshopt, reorder } from '@gltf-transform/functions';
@@ -23,8 +24,8 @@ for (const mesh of doc.getRoot().listMeshes()) for (const prim of mesh.listPrimi
   for (let i = 0; i < C.getCount(); i++) {
     C.getElement(i, e);
     const [h, s, v] = rgb2hsv(toS(e[0]), toS(e[1]), toS(e[2]));
-    if (h > 0.52 && h < 0.73 && s > 0.35) {
-      const [r, g, b] = hsv2rgb(hue, Math.min(1, s * smul), Math.min(1, v * vmul));
+    if (process.env.SHIFT ? s > 0.18 : h > 0.52 && h < 0.73 && s > 0.35) {
+      const [r, g, b] = hsv2rgb(process.env.SHIFT ? (h + hue) % 1 : hue, Math.min(1, s * smul), Math.min(1, v * vmul));
       e[0] = toL(r); e[1] = toL(g); e[2] = toL(b);
       C.setElement(i, e);
       n++;

@@ -465,25 +465,37 @@ export class Effects {
     this.sparkles.update(dt);
   }
 
-  /** a few flocks of cartoon birds circling the village */
-  addBirds(count = 3) {
+  private birdTex = new Map<string, THREE.Texture>();
+  private birdTexture(color: string) {
+    let tex = this.birdTex.get(color);
+    if (tex) return tex;
     const c = document.createElement('canvas');
     c.width = 128; c.height = 64;
     const g = c.getContext('2d')!;
-    g.strokeStyle = '#3b4a5c'; g.lineWidth = 7; g.lineCap = 'round';
+    g.strokeStyle = color; g.lineWidth = 7; g.lineCap = 'round';
     g.beginPath(); g.moveTo(6, 22); g.quadraticCurveTo(34, 2, 64, 34); g.quadraticCurveTo(94, 2, 122, 22); g.stroke();
-    const tex = new THREE.CanvasTexture(c);
+    tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
+    this.birdTex.set(color, tex);
+    return tex;
+  }
+  /** a few flocks of cartoon birds circling the village */
+  addBirds(count = 3) {
     for (let f = 0; f < count; f++) {
-      const flock = { center: new THREE.Vector3((Math.random() - 0.5) * 60, 25 + f * 35 + Math.random() * 15, (Math.random() - 0.5) * 60), r: 45 + Math.random() * 40, speed: (0.08 + Math.random() * 0.05) * (f % 2 ? 1 : -1), phase: Math.random() * 6, birds: [] as { s: THREE.Sprite; off: THREE.Vector3; flap: number }[] };
-      for (let i = 0; i < 6; i++) {
-        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: true }));
-        s.scale.set(1.3, 0.65, 1);
-        this.group.add(s);
-        flock.birds.push({ s, off: new THREE.Vector3((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 2.5, (Math.random() - 0.5) * 6), flap: Math.random() * 6 });
-      }
-      this.flocks.push(flock);
+      this.addFlock(new THREE.Vector3((Math.random() - 0.5) * 60, 25 + f * 35 + Math.random() * 15, (Math.random() - 0.5) * 60), 45 + Math.random() * 40, 6, f % 2 ? 1 : -1, undefined, 0.08 + Math.random() * 0.05);
     }
+  }
+  /** one flock of n birds circling `center` at radius r (dir: 1 / -1) */
+  addFlock(center: THREE.Vector3, r: number, n = 6, dir = 1, color = '#3b4a5c', speed?: number) {
+    const tex = this.birdTexture(color);
+    const flock = { center: center.clone(), r, speed: (speed ?? (0.08 + Math.random() * 0.05) * (40 / Math.max(20, r)) ** 0.5) * dir, phase: Math.random() * 6, birds: [] as { s: THREE.Sprite; off: THREE.Vector3; flap: number }[] };
+    for (let i = 0; i < n; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: true }));
+      s.scale.set(1.3, 0.65, 1);
+      this.group.add(s);
+      flock.birds.push({ s, off: new THREE.Vector3((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 2.5, (Math.random() - 0.5) * 6), flap: Math.random() * 6 });
+    }
+    this.flocks.push(flock);
   }
 
   burst(at: THREE.Vector3, color = '#ffe08a') {

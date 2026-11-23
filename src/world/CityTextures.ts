@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { lang, type Lang } from '../i18n';
 
 /** Procedural textures for Map 002 – Rooftop City (generated at runtime, zero download). */
 
@@ -247,13 +248,13 @@ export function awningTex(hue = 355) {
   return toTex(c);
 }
 
-const ADS: { bg: string[]; title: string; sub: string; fg: string; shape: 'circle' | 'bolt' | 'cup' | 'slice' | 'wing' }[] = [
-  { bg: ['#ff6b6b', '#ffb36b'], title: 'SKY COLA', sub: 'Mát lạnh trên mây', fg: '#ffffff', shape: 'cup' },
-  { bg: ['#3a7bd5', '#00d2ff'], title: 'BAY CAO HƠN', sub: 'Skyward Parkour', fg: '#ffffff', shape: 'wing' },
-  { bg: ['#f7b733', '#fc4a1a'], title: 'PIZZA MÁI NHÀ', sub: 'Giao tận sân thượng', fg: '#fffbe8', shape: 'slice' },
-  { bg: ['#11998e', '#38ef7d'], title: 'CÀ PHÊ ĐỈNH', sub: 'Mở cửa 24/7', fg: '#ffffff', shape: 'circle' },
-  { bg: ['#8e2de2', '#4a00e0'], title: 'NEON NIGHT', sub: 'Lễ hội ánh sáng', fg: '#ffe6ff', shape: 'bolt' },
-  { bg: ['#ee9ca7', '#ffdde1'], title: 'BÁNH MÌ MÂY', sub: 'Giòn từ tầng 1 tới tầng 99', fg: '#6b2737', shape: 'circle' },
+const ADS: { bg: string[]; title: Record<Lang, string>; sub: Record<Lang, string>; fg: string; shape: 'circle' | 'bolt' | 'cup' | 'slice' | 'wing' }[] = [
+  { bg: ['#ff6b6b', '#ffb36b'], title: { en: 'SKY COLA', vi: 'SKY COLA' }, sub: { en: 'Ice cold above the clouds', vi: 'Mát lạnh trên mây' }, fg: '#ffffff', shape: 'cup' },
+  { bg: ['#3a7bd5', '#00d2ff'], title: { en: 'CLIMB HIGHER', vi: 'BAY CAO HƠN' }, sub: { en: 'Skyward Parkour', vi: 'Skyward Parkour' }, fg: '#ffffff', shape: 'wing' },
+  { bg: ['#f7b733', '#fc4a1a'], title: { en: 'ROOFTOP PIZZA', vi: 'PIZZA MÁI NHÀ' }, sub: { en: 'Delivered to your rooftop', vi: 'Giao tận sân thượng' }, fg: '#fffbe8', shape: 'slice' },
+  { bg: ['#11998e', '#38ef7d'], title: { en: 'PEAK COFFEE', vi: 'CÀ PHÊ ĐỈNH' }, sub: { en: 'Open 24/7', vi: 'Mở cửa 24/7' }, fg: '#ffffff', shape: 'circle' },
+  { bg: ['#8e2de2', '#4a00e0'], title: { en: 'NEON NIGHT', vi: 'NEON NIGHT' }, sub: { en: 'Festival of lights', vi: 'Lễ hội ánh sáng' }, fg: '#ffe6ff', shape: 'bolt' },
+  { bg: ['#ee9ca7', '#ffdde1'], title: { en: 'CLOUD BREAD', vi: 'BÁNH MÌ MÂY' }, sub: { en: 'Crispy from floor 1 to 99', vi: 'Giòn từ tầng 1 tới tầng 99' }, fg: '#6b2737', shape: 'circle' },
 ];
 export const AD_COUNT = ADS.length;
 
@@ -280,10 +281,10 @@ export function adTex(i: number) {
   g.fillStyle = a.fg;
   g.font = 'bold 58px "Trebuchet MS", Arial, sans-serif';
   g.textBaseline = 'middle';
-  g.fillText(a.title, 26, 104, 330);
+  g.fillText(a.title[lang()], 26, 104, 330);
   g.font = '600 26px "Trebuchet MS", Arial, sans-serif';
   g.globalAlpha = 0.9;
-  g.fillText(a.sub, 28, 166, 330);
+  g.fillText(a.sub[lang()], 28, 166, 330);
   g.globalAlpha = 1;
   g.strokeStyle = 'rgba(0,0,0,0.25)';
   g.lineWidth = 10;

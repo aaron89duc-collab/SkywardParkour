@@ -1,4 +1,5 @@
 import { Input } from './Input';
+import { t, onLang } from '../i18n';
 import { CAMERA } from '../config';
 
 /** Virtual joystick (left), camera swipe (right), JUMP / DROP buttons. Feeds the shared Input. */
@@ -22,14 +23,19 @@ export class TouchControls {
       <div class="touch-stick-zone"></div>
       <div class="touch-look-zone"></div>
       <div class="stick-base"><div class="stick-knob"></div></div>
-      <button class="tbtn tbtn-drop" aria-label="Xuống">XUỐNG</button>
-      <button class="tbtn tbtn-jump" aria-label="Nhảy">NHẢY</button>`;
+      <button class="tbtn tbtn-drop" aria-label="${t('touch.dropAria')}">${t('touch.drop')}</button>
+      <button class="tbtn tbtn-jump" aria-label="${t('touch.jumpAria')}">${t('touch.jump')}</button>`;
     parent.appendChild(this.root);
     this.stickBase = this.root.querySelector('.stick-base') as HTMLDivElement;
     this.stickKnob = this.root.querySelector('.stick-knob') as HTMLDivElement;
     this.jumpBtn = this.root.querySelector('.tbtn-jump') as HTMLButtonElement;
     this.dropBtn = this.root.querySelector('.tbtn-drop') as HTMLButtonElement;
     this.dropBtn.style.display = 'none';
+    onLang(() => {
+      this.jumpBtn.setAttribute('aria-label', t('touch.jumpAria'));
+      this.dropBtn.setAttribute('aria-label', t('touch.dropAria'));
+      this.labelButtons();
+    });
     const stickZone = this.root.querySelector('.touch-stick-zone') as HTMLDivElement;
     const lookZone = this.root.querySelector('.touch-look-zone') as HTMLDivElement;
 
@@ -168,17 +174,22 @@ export class TouchControls {
   }
 
   private fly = false;
-  /** admin fly mode: hold LÊN to rise, XUỐNG to sink (the only use of the second button) */
+  /** admin fly mode: hold UP to rise, DROP to sink (the only use of the second button) */
   setFly(on: boolean) {
     this.fly = on;
-    this.jumpBtn.textContent = on ? 'LÊN' : 'NHẢY';
-    this.dropBtn.textContent = 'XUỐNG';
+    this.labelButtons();
     this.dropBtn.style.display = on ? '' : 'none'; // gameplay: no drop button (run, steer, jump)
   }
 
   setHanging(h: boolean) {
+    this.hanging = h;
     if (this.fly) return;
-    this.jumpBtn.textContent = h ? 'LEO' : 'NHẢY';
+    this.labelButtons();
+  }
+  private hanging = false;
+  private labelButtons() {
+    this.jumpBtn.textContent = this.fly ? t('touch.up') : this.hanging ? t('touch.climb') : t('touch.jump');
+    this.dropBtn.textContent = t('touch.drop');
   }
 }
 

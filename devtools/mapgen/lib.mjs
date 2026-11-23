@@ -378,7 +378,7 @@ export class MapBuilder {
     const nodes = [];
     for (const o of this.objects) {
       if (o.type === 'prefab') {
-        if (!o.solid) continue;
+        if (!o.solid || o.noStand) continue; // noStand: solid, but its top is covered (lower pieces of a stack)
         const g = o.g;
         const cellW = ((g.maxx - g.minx) / G) * o.s;
         const st = Math.max(1, Math.round(0.6 / cellW));
@@ -396,6 +396,11 @@ export class MapBuilder {
           }
           if (ok < 2) continue;
           const [wx, wz] = o.toWorld(lx, lz);
+          // opt-in (map builder sets supportR): the capsule needs a flat patch around the node, not a thin lip
+          if (this.supportR) {
+            const y0 = o.y + g.top[k] * o.s, R = this.supportR;
+            if ([[R, 0], [-R, 0], [0, R], [0, -R]].some(([ax, az]) => { const t = o.topAt(wx + ax, wz + az); return t === null || Math.abs(t - y0) > 0.15; })) continue;
+          }
           nodes.push({ x: wx, y: o.y + g.top[k] * o.s, z: wz, o });
         }
       } else {

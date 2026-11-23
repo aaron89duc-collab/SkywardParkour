@@ -25,8 +25,10 @@ export interface KitData {
   r?: number;
   /** size parameters (see Kit.ts for meaning per kind) */
   s: number[];
-  /** material variant (e.g. 'grass', 'dark') */
+  /** material variant (e.g. 'grass', 'dark'); sign: its text 'TITLE|subtitle' */
   m?: string;
+  /** sign: English text (the base `m` is Vietnamese; see i18n.loc) */
+  m_en?: string;
   /** rope end point */
   q?: V3;
   /** no collider (decor only) */
@@ -113,6 +115,11 @@ export interface SpriteData {
   h: number; // height in metres
   sway?: number; // wind sway amount (vegetation)
   flip?: boolean;
+  /** ambient motion (Map 004+; older apps draw the sprite still):
+   *  bob   – up/down a m, s rad/s;  orbit – circles p at r m, s rad/s (bob a);
+   *  rise  – rises span m at s m/s, then pops and starts again (wobble a);  drift – travels span m along yaw d (radians)
+   *  at s m/s and fades in again at the start (bob a). ph = phase (0..1 for rise / drift, radians otherwise) */
+  mv?: { k: 'bob' | 'orbit' | 'rise' | 'drift'; a?: number; s?: number; ph?: number; r?: number; span?: number; d?: number };
 }
 
 export type FxData =
@@ -120,11 +127,15 @@ export type FxData =
   | { t: 'shrine'; p: V3; s: number; exit?: boolean }
   | { t: 'glow'; p: V3; s: number; c?: string }
   | { t: 'milestone'; p: V3; h: number }
-  | { t: 'portal'; p: V3; s: number; r: number };
+  | { t: 'portal'; p: V3; s: number; r: number }
+  /** a flock of cartoon birds circling p (radius r) – Map 004+; older apps ignore it */
+  | { t: 'birds'; p: V3; r: number; n?: number; c?: string };
 
 export interface ZoneData {
   id: string;
   name: string;
+  /** English name (the base `name` is Vietnamese; see i18n.loc) */
+  name_en?: string;
   y0: number;
   y1: number;
   color: string;
@@ -148,6 +159,7 @@ export interface MapData {
   emissive?: Record<string, number>;
   /** shown when the map is finished (end-of-content hint) */
   finishHint?: string;
+  finishHint_en?: string;
   zones: ZoneData[];
   milestones: number[];
   terrain: TerrainData;

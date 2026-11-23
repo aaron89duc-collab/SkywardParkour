@@ -14,6 +14,7 @@
   "maps/map001.json",
   "assets/map001"
  ],
- "version": 2,
- "contentHash": "a66e325f995fb445656c1eb1997318d38f7e4640a8505251ea18321c43449fd6"
+ "version": 3,
+ "contentHash": "95d8aed6460026eb392fd071d4a4074a692d5d15d2cf8e64765088018d9bf5fe",
+ "summary_en": "The starting village · 0 → 140 m · 5 zones"
 }
