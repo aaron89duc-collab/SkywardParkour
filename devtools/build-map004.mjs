@@ -431,7 +431,7 @@ if (STAGE === 'all' || +STAGE >= 2) {
   // secret (zone 2): walk in through the gingerbread house door - a fan inside blows you out of the chimney onto
   // hidden floats along the west edge, which join the hard route (and skip most of the zone)
   const HS2 = house(-57.8, 2.4, Y2, 3.6);
-  fan('hf2', -57.8, Y2, 2.4, 1.6, 15.0, { force: 100, color: '#ffb36b' });
+  fan('hf2', -57.8, Y2, 2.4, 1.6, 13.0, { force: 50, color: '#ffb36b' }); // pulses ~14 m
   alt('z2secret', { p: HS2.door, label: 'gingerbread house door' }, [
     ['jelly_block', -58.6, -1.0, Y2 + 12.4, 1.8], ['gummy_platform', -58.8, -4.6, Y2 + 14.2, 2.0], ['macaron_platform', -57.8, -8.0, Y2 + 16.0, 2.2],
     { rec: Z2H[0], label: 'hard route gummy (joins)' },
@@ -570,7 +570,7 @@ if (STAGE === 'all' || +STAGE >= 4) {
   // secret (zone 4): the chocolate waterfall under the jellies is only chocolate - walk through the curtain and the
   // updraft hidden inside lifts you past the rivers and the crumbling wafers onto Q1
   deco('choco_waterfall_wall', -55.4, -6.6, Y4, 6.5, -90);
-  fan('wf4', -55.4, Y4, -6.6, 2.4, 13.0, { force: 100, color: '#c98a47' });
+  fan('wf4', -55.4, Y4, -6.6, 2.4, 12.0, { force: 50, color: '#c98a47' }); // pulses ~13 m (16 m with a jump): Q1, not the top of the zone
   B.mark('z4secret', [-58.6, Y4, -6.6], 'in front of the chocolate waterfall');
   B.mark('z4secret', P(Q4[0]), 'Q1 (joins the main route)', 'fan:wf4');
   for (const [x, z, sc, r] of [[-56.9, -9.2, 0.8, 0], [-56.8, -4.0, 0.7, 70], [-46.8, 3.2, 0.9, 150], [-58.8, 3.4, 0.8, 300]]) bush(x, z, Y4, sc, r);
@@ -751,14 +751,15 @@ if (STAGE === 'all' || +STAGE >= 7) {
   const RM2 = piece('macaron_platform', -70.8, 1.4, Y7 + 14.2, 2.6);
   mark([-71.0, Y7 + 13.6, -6.0], 'crumbling wafers'); mark(P(RM2), 'tower top', 'sweep:sw7');
   void CR7;
-  // secret: a candy fan hidden in the corner behind the corner tower lifts you to a hidden ledge next to the tower top
-  fan('f7', -73.2, Y7, -0.9, 1.8, 14.0, { force: 100, color: '#ff9fd0' });
-  for (const [x, z, sc, r] of [[-72.0, 0.4, 0.9, 30], [-72.2, -2.4, 0.8, 200], [-73.6, 1.4, 0.7, 120]]) bush(x, z, Y7, sc, r);
-  const SEC7 = piece('jelly_block', -73.0, -3.0, Y7 + 10.6, 1.6, { name: 'secret ledge' });
-  gem('gem6', [-73.0, SEC7.top, -3.0]);
-  B.mark('z7secret', [-71.4, Y7, -1.4], 'behind the corner tower');
-  B.mark('z7secret', P(SEC7), 'secret ledge', 'fan:f7');
-  B.mark('z7secret', P(RM2), 'tower top (joins the main route)');
+  // secret: an updraft hidden in a gumdrop bush between the castle wall and the keep lifts you to a hidden ledge on
+  // the wall (gem 6), one grab below the rampart – past the plate, the piston bridge and the cannon
+  fan('f7', -71.6, Y7, -12.4, 1.6, 13.0, { force: 50, color: '#ff9fd0' }); // a pulsing updraft: ~14 m, nowhere near the summit
+  for (const [x, z, sc, r] of [[-71.6, -12.4, 0.8, 30], [-70.6, -11.2, 0.7, 200], [-72.2, -13.8, 0.7, 120]]) bush(x, z, Y7, sc, r);
+  const SEC7 = piece('jelly_block', -73.4, -11.6, Y7 + 10.6, 1.6, { name: 'secret ledge' });
+  gem('gem6', [-73.4, SEC7.top, -11.6]);
+  B.mark('z7secret', [-69.4, Y7, -12.0], 'by the keep');
+  B.mark('z7secret', P(SEC7), 'secret ledge on the wall', 'fan:f7');
+  B.mark('z7secret', P(RM1, 0, 0.6), 'rampart (joins the main route)');
   // macaron steps round the keep to the summit
   const SP = [[-67.2, 2.0, 15.8], [-63.4, -0.4, 17.4], [-62.0, -4.4, 19.0], [-62.4, -8.4, 20.6], [-64.4, -12.0, 22.2], [-62.8, -15.8, 23.8], [-65.4, -18.8, 25.4], [-66.0, -14.6, 27.0], [-68.6, -11.6, 28.4]]
     .map(([x, z, h], i) => piece(i % 3 === 1 ? 'macaron_platform' : i % 3 === 2 ? 'jelly_block' : 'macaron_platform', x, z, Y7 + h, i % 3 === 2 ? 2.2 : 2.4, { r: i * 40 }));
@@ -779,7 +780,9 @@ if (STAGE === 'all' || +STAGE >= 7) {
   EXIT = [-68.6, TOP, -6.0];
   console.log('zone 7 placed');
 }
-boundary();
+// no outer boundary any more (user's call, 23/11/2026): players may jump off the tower and fall freely –
+// losing the height is part of the challenge. boundary() is kept for reference.
+void boundary;
 console.log('hops:\n  ' + hops.join('\n  '));
 
 // =====================================================================================
@@ -847,7 +850,7 @@ const data = B.toJSON({
   challengeTime: 1500,
   zones, milestones: [540, 560, 580, 600, 620, 640, 660, 680, 700, 720],
   region: { c: [C4.x, C4.z], r: RING },
-  terrain: { style: 'none', radius: RING, center: [C4.x, Y1 + 20, C4.z], wallTop: TOP + 40 - (Y1 + 20), plazas: [], paths: [] },
+  terrain: { style: 'none', radius: RING, center: [C4.x, Y1 + 20, C4.z], wallTop: 0, plazas: [], paths: [] },
   movers, pads, rings: [], ladders, devices, padModel: PADM,
   prefabFiles: Object.fromEntries([...new Set(B.prefabs.map((p) => p.id))].map((id) => [id, `${A}/${id}`])),
   waypoints: makeWaypoints(B.routes, zones),

@@ -596,6 +596,7 @@ export class Game {
     };
     this.ui.online = new OnlineUI(this.container, host);
     this.ui.online.reopenAchievements = () => this.openAchievements();
+    this.input.onImeDetected = () => this.ui.toast(t('toast.ime'), t('toast.imeSub'), false, 6500);
     // a new language: gate signs follow at once (UI panels and the HUD redraw themselves)
     onLang(() => this.syncGates());
     // back online: send waiting results (new maps: AutoSync listens by itself)

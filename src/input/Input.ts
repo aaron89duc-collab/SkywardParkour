@@ -1,3 +1,9 @@
+/** characters a Vietnamese input method (Telex) types in place of the key just pressed: w → ư / ơ / ă (uw, ow, aw),
+ *  aa → â, dd → đ, s → the acute tone on the vowel before it */
+const IME_MOVE: Record<string, string> = { w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', 'â': 'KeyA', 'đ': 'KeyD' };
+for (const c of 'ươă') IME_MOVE[c] = 'KeyW';
+for (const c of 'áấắéếíóốớúứý') IME_MOVE[c] = 'KeyS';
+
 /**
  * Unified input: keyboard/mouse and touch both write into the same command set.
  * The player controller only ever reads these commands (no platform-specific gameplay code).
@@ -18,6 +24,11 @@ export class Input {
 
   // sources
   private keys = new Set<string>();
+  /** movement keys seen only through a Vietnamese input method (code -> expiry, ms): see onKey */
+  private imeKeys = new Map<string, number>();
+  /** called once when a Vietnamese input method (Unikey / EVKey, Telex or VNI) is seen eating W A S D */
+  onImeDetected: (() => void) | null = null;
+  private imeNoticed = false;
   touchMoveX = 0;
   touchMoveY = 0;
   touchJumpHeld = false;
@@ -37,7 +48,7 @@ export class Input {
   constructor(private canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => this.onKey(e, true));
     window.addEventListener('keyup', (e) => this.onKey(e, false));
-    window.addEventListener('blur', () => { this.keys.clear(); this.jumpHeld = false; });
+    window.addEventListener('blur', () => { this.keys.clear(); this.imeKeys.clear(); this.jumpHeld = false; });
     canvas.addEventListener('mousedown', (e) => {
       if (!this.enabled || this.usingTouch) return;
       if (e.button === 0 && !this.pointerLocked && canvas.requestPointerLock) {
@@ -75,6 +86,16 @@ export class Input {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const k = e.code;
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) e.preventDefault();
+    // A Vietnamese input method (Unikey, EVKey… in Telex: w → ư, aa → â, dd → đ, s = tone mark) swallows the
+    // letter key and types its own character instead: the browser then sees a key with no physical code
+    // (or 'Process'), so W A S D seem dead now and then while the arrow keys always work. Read those
+    // characters as the movement key they came from; they hold for a moment and are refreshed by key repeat.
+    if (!k || k === 'Unidentified' || e.key === 'Process') {
+      const code = IME_MOVE[e.key] ?? IME_MOVE[e.key?.toLowerCase?.() ?? ''];
+      if (code || e.key === 'Process') this.noticeIme();
+      if (code && down) { this.imeKeys.set(code, performance.now() + 650); this.lastInputTime = performance.now(); }
+      return;
+    }
     if (down) {
       if (e.repeat) return;
       this.keys.add(k);
@@ -83,8 +104,20 @@ export class Input {
       if (k === 'Escape' || k === 'KeyP') this.pauseLatch = true;
     } else {
       this.keys.delete(k);
+      this.imeKeys.delete(k);
       if (k === 'Space') this.releaseJump(e.timeStamp);
     }
+  }
+
+  private noticeIme() {
+    if (this.imeNoticed || !this.enabled) return;
+    this.imeNoticed = true;
+    this.onImeDetected?.();
+  }
+  private has(code: string) {
+    if (this.keys.has(code)) return true;
+    const t = this.imeKeys.get(code);
+    return t !== undefined && t > performance.now();
   }
 
   releasePointer() {
@@ -95,10 +128,10 @@ export class Input {
   update() {
     const k = this.keys;
     let x = 0, y = 0;
-    if (k.has('KeyW') || k.has('ArrowUp')) y += 1;
-    if (k.has('KeyS') || k.has('ArrowDown')) y -= 1;
-    if (k.has('KeyD') || k.has('ArrowRight')) x += 1;
-    if (k.has('KeyA') || k.has('ArrowLeft')) x -= 1;
+    if (this.has('KeyW') || k.has('ArrowUp')) y += 1;
+    if (this.has('KeyS') || k.has('ArrowDown')) y -= 1;
+    if (this.has('KeyD') || k.has('ArrowRight')) x += 1;
+    if (this.has('KeyA') || k.has('ArrowLeft')) x -= 1;
     const walk = k.has('ControlLeft') || k.has('AltLeft');
     if (x !== 0 || y !== 0) {
       const len = Math.hypot(x, y);

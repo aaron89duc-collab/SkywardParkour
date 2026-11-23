@@ -589,7 +589,9 @@ if (STAGE === 'all') {
   EXIT = P(TOPP, 0, 0.6);
   console.log('zone 7 placed', JSON.stringify({ k78: k78.top, TOP }));
 }
-boundary();
+// no outer boundary any more (user's call, 23/11/2026): players may jump off the tower and fall freely –
+// losing the height is part of the challenge. boundary() is kept for reference.
+void boundary;
 function sweepCheck() {
   const skip = new Set(['trolley rail', 'gantry leg', 'jib mast', 'lift tower', 'gantry arm', 'divider']);
   const objBoxes = (o) => {
@@ -673,7 +675,7 @@ const data = B.toJSON({
   challengeTime: 1500,
   zones, milestones: [340, 360, 380, 400, 420, 440, 460, 480, 500, 520],
   region: { c: [C3.x, C3.z], r: RING },
-  terrain: { style: 'none', radius: RING, center: [C3.x, 340, C3.z], wallTop: TOP + 40 - 340, plazas: [], paths: [] },
+  terrain: { style: 'none', radius: RING, center: [C3.x, 340, C3.z], wallTop: 0, plazas: [], paths: [] },
   movers, pads, rings: [], ladders,
   padModel: PADM,
   prefabFiles: Object.fromEntries([...new Set(B.prefabs.map((p) => p.id))].map((id) => [id, `assets/map003/${id}`])),

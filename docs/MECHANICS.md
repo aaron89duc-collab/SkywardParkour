@@ -91,8 +91,12 @@ piece. Rotation rules keep maps fresh:
 - the same GLB set is reused across a themed arc of ~5 maps (small downloads: shared files are stored once).
 
 ## 4. Safety rules every map keeps
-- Falls end inside the same map (each zone sits above its own start deck, decks alternate halves, grate
-  dividers between the halves, invisible boundary around the footprint).
+- Inside the tower, falls end in the same zone (each zone sits above its own start deck, decks alternate halves,
+  dividers between the halves). **No outer boundary** (from Map 003 on, user's call 23/11/2026): a player may jump
+  off the tower and fall freely – onto Map 003's base deck, a roof of Map 002 or the village. Losing the height is
+  part of the challenge. Map streaming keeps up: the maps below come into the world as soon as the player falls into
+  the next map's height band (`devtools/out/freefall.cjs`: a fall from 650 m lands in the village after ~17 s, Map 001
+  in the world ~9 s before).
 - Moving objects run in their own height band or lane; the clearance check must report 0 hits.
 - The exit gate opens only when the next map is in the world.
 
@@ -110,8 +114,8 @@ A map is not one straight climb. Each map has:
 
 Map 004 (Candy Kingdom) as the reference: per zone an easy (`zNeasy`) and a hard (`zNhard`) line next to the main
 route, plus secrets – `z2secret` (gingerbread house door → fan out of the chimney → hidden floats), `z4secret`
-(walk through the chocolate waterfall → updraft → past the rivers), `z7secret` (fan behind the corner tower →
-secret ledge with a gem) and the gem portal (5 gems → courtyard straight up to the spiral).
+(walk through the chocolate waterfall → updraft → past the rivers), `z7secret` (updraft hidden in a gumdrop bush by the keep →
+secret ledge on the wall with a gem → the rampart) and the gem portal (5 gems → courtyard straight up to the spiral).
 
 ## 6. Scenery and ambience (data only)
 - `atlas` = the map's own sprite atlas (logical path without extension, `.webp` + `.json`), built from the artist's
@@ -120,6 +124,8 @@ secret ledge with a gem) and the gem portal (5 gems → courtyard straight up to
   `bob` (a m, s rad/s) · `orbit` (around p, r m, s rad/s, bob a) · `rise` (bubbles: span m at s m/s, then pop) ·
   `drift` (clouds / balloons: span m along yaw d at s m/s, dissolving in and out at the ends). `ph` = phase.
 - `fx` `{ t: 'birds', p, r, n?, c? }` = a flock circling p (older apps ignore it).
+- Secret updrafts pulse (force ≈ 50): they lift about 1.1 × their height and drop you again, so they reach the hidden
+  ledge but can never throw a player up to a later part of the map (`devtools/out/fanmax.cjs` measures the top).
 - Prefabs with `col: false` are walk-through decoration (bushes, the chocolate waterfall); invisible `wall` kit
   pieces make a model solid only where it should be (the walk-in gingerbread house).
 

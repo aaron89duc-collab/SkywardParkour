@@ -174,8 +174,14 @@ const fs = require('fs');
             } else if (P.state === 'air') {
               I.touchMoveY = airSteer(dist, feet.y - G[1]);
               if (P.boosting && dist > 2) I.touchMoveY = 1;
-              if ((via && viaI < via.length) || (kind === 'fan' && !fanUp) || (kind === 'cannon' && !segLaunch)) I.touchMoveY = dist > 0.25 ? 1 : 0;
-            } else I.touchMoveY = dist > 0.35 ? (dist < 0.9 && B[1] - feet.y < 0.4 ? 0.45 : 1) : 0;
+              if ((via && viaI < via.length) || (kind === 'cannon' && !segLaunch)) I.touchMoveY = dist > 0.25 ? 1 : 0;
+              if (kind === 'fan' && !fanUp) {
+                // riding the updraft: stay over its centre (brake when sliding across it, a player lets go of the stick)
+                const toward = (P.vel.x * dx + P.vel.z * dz) / (dist || 1);
+                I.touchMoveY = dist < 1.0 && toward > 0.8 ? -1 : dist > 0.25 ? 1 : 0;
+              }
+            } else if (kind === 'fan' && !fanUp) I.touchMoveY = dist > 2.2 ? 1 : dist > 0.3 ? 0.4 : 0; // walk into the updraft
+            else I.touchMoveY = dist > 0.35 ? (dist < 0.9 && B[1] - feet.y < 0.4 ? 0.45 : 1) : 0;
             if (kind === 'zip' && !segZip && P.state === 'ground' && dist < 1.9 && t - lastJump > 0.4) { I.pressJump(); holdJump = 0.45; lastJump = t; skipJump = true; }
             if (noJump) skipJump = true;
             // a sweeping bar about to reach us: jump over it

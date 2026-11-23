@@ -166,6 +166,8 @@ const STR = {
   'toast.ledgeTouch': { en: 'JUMP: climb up · Stick left/right: shimmy · Pull back + JUMP: wall jump · Hold back: let go', vi: 'NHẢY: leo lên · Cần trái/phải: đi dọc mép · Kéo lùi + NHẢY: bật tường · Giữ kéo lùi: buông' },
   'toast.ledgeKeys': { en: 'Space: climb up · A/D: shimmy · S + Space: wall jump · Hold S: let go', vi: 'Space: leo lên · A/D: đi dọc mép · S + Space: bật tường · Giữ S: buông' },
   'toast.mapInfo': { en: 'Map {no} · {y0}–{y1} m', vi: 'Map {no} · {y0}–{y1} m' },
+  'toast.ime': { en: 'Vietnamese typing (Unikey / EVKey) is on', vi: 'Bộ gõ tiếng Việt (Unikey / EVKey) đang bật' },
+  'toast.imeSub': { en: 'It can swallow W A S D – switch it to English (E) while playing, or use the arrow keys', vi: 'Bộ gõ có thể "nuốt" phím W A S D – chuyển sang chế độ E (tiếng Anh) khi chơi, hoặc dùng phím mũi tên' },
   // touch buttons
   'touch.drop': { en: 'DROP', vi: 'XUỐNG' },
   'touch.dropAria': { en: 'Drop', vi: 'Xuống' },
