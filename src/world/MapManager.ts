@@ -7,6 +7,7 @@ import { PrefabSystem } from './Prefabs';
 import { SpriteSystem, type AtlasRect } from './Sprites';
 import { buildTerrain, type Footprint } from './Terrain';
 import { Effects } from '../fx/Effects';
+import { DeviceSystem, type Carrier, type Surface, type DeviceAction } from './Devices';
 import { MoverSystem } from './Movers';
 import { BoosterSystem, type Ladder } from './Boosters';
 import type RAPIER from '@dimforge/rapier3d-compat';
@@ -20,6 +21,7 @@ type LoadedMap = {
   sprites: SpriteSystem | null;
   movers: MoverSystem;
   boosters: BoosterSystem;
+  devices: DeviceSystem;
 };
 
 /**
@@ -189,15 +191,41 @@ export class MapManager {
     await boosters.build(data.pads, data.rings, data.ladders, this.assets, data.padModel);
     group.add(boosters.group);
 
+    const devices = new DeviceSystem(this.physics);
+    await devices.build(data.devices ?? [], this.assets);
+    group.add(devices.group);
+    if (this.collected) devices.markCollected([...this.collected].filter((k) => k.startsWith(entry.id + ':')).map((k) => k.slice(entry.id.length + 1)));
+
     this.root.add(group);
-    this.loaded.set(entry.id, { entry, data, group, prefabs, sprites, movers, boosters });
+    this.loaded.set(entry.id, { entry, data, group, prefabs, sprites, movers, boosters, devices });
     this.ladderList = [...this.loaded.values()].flatMap((m) => m.boosters.ladders);
     this.physics.world.updateSceneQueries();
     return data;
   }
 
   // ---- dynamic world features across all loaded maps (Player.hooks)
-  moverOf(c: RAPIER.Collider | null | undefined) {
+  /** pickups collected in earlier sessions (ids): a map loaded later hides them */
+  collected: Iterable<string> | null = null;
+  /** the player (one-way platforms need to know where the feet are) */
+  playerFeet: (() => { y: number; rising: boolean }) | null = null;
+  /** device systems outside any map (test bench, admin sandbox) */
+  private extraDevices: DeviceSystem[] = [];
+  private devs() { const l = [...this.loaded.values()].map((m) => m.devices); return this.extraDevices.length ? l.concat(this.extraDevices) : l; }
+  /** Build a set of devices that is not part of a map (test bench / sandbox). */
+  async addDevices(list: import('./Devices').DeviceData[]) {
+    const d = new DeviceSystem(this.physics);
+    await this.physics.ownedBy('__devices', () => d.build(list, this.assets));
+    this.root.add(d.group);
+    this.extraDevices.push(d);
+    return d;
+  }
+  surfaceOf(c: RAPIER.Collider | null | undefined): Surface | null { for (const d of this.devs()) { const r = d.surfaceOf(c); if (r) return r; } return null; }
+  stood(c: RAPIER.Collider | null | undefined, p: THREE.Vector3) { for (const d of this.devs()) d.stood(c, p); }
+  field(p: THREE.Vector3, out: { g: number; acc: THREE.Vector3 }) { for (const d of this.devs()) d.field(p, out); }
+  push(p: THREE.Vector3, out: { d: THREE.Vector3; v: THREE.Vector3 }) { let h = false; for (const d of this.devs()) if (d.push(p, out)) h = true; return h; }
+  touch(p: THREE.Vector3, vel: THREE.Vector3, airborne: boolean): DeviceAction | null { for (const d of this.devs()) { const r = d.touch(p, vel, airborne); if (r) return r; } return null; }
+  moverOf(c: RAPIER.Collider | null | undefined): Carrier | null {
+    for (const d of this.devs()) { const r = d.carrierOf(c); if (r) return r; }
     if (!c) return null;
     for (const m of this.loaded.values()) { const r = m.movers.moverOf(c); if (r) return r; }
     return null;
@@ -213,8 +241,13 @@ export class MapManager {
   }
   ladders() { return this.ladderList; }
 
-  stepMovers(t: number, dt: number) { for (const m of this.loaded.values()) m.movers.step(t, dt); }
-  resetMovers(t: number) { for (const m of this.loaded.values()) m.movers.reset(t); }
+  stepMovers(t: number, dt: number) {
+    const f = this.playerFeet?.() ?? { y: -1e9, rising: false };
+    for (const m of this.loaded.values()) m.movers.step(t, dt);
+    for (const d of this.devs()) d.step(t, dt, f.y, f.rising);
+    if (this.extraDevices.length || [...this.loaded.values()].some((m) => m.devices.list.length)) this.physics.world.updateSceneQueries();
+  }
+  resetMovers(t: number) { for (const m of this.loaded.values()) m.movers.reset(t); for (const d of this.devs()) d.reset(t); }
   syncMovers(alpha: number) { for (const m of this.loaded.values()) m.movers.syncVisual(alpha); }
 
   get primary(): MapData | null {

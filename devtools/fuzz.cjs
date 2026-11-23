@@ -47,7 +47,6 @@ const fs = require('fs');
             if (rnd() < 0.2) { I.touchMoveX *= 0.4; I.touchMoveY *= 0.4; }
           }
           if (rnd() < 0.08) { I.touchJumpHeld = !I.touchJumpHeld; if (I.touchJumpHeld) I.pressJump(); }
-          if (rnd() < 0.01) I.pressDrop();
           I.update();
           P.fixedUpdate(1 / 60, I, I._cy || 0);
           ph.step();

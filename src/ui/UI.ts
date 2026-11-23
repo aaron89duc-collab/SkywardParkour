@@ -192,7 +192,7 @@ export class UI {
     this.quality = quality;
     const best = save.personalBest;
     const ctrls = this.touch
-      ? 'Cần điều khiển trái: di chuyển · Vuốt phải: xoay camera · NHẢY / LEO · THẢ: buông mép, trèo xuống mép'
+      ? 'Cần điều khiển trái: di chuyển · Vuốt phải: xoay camera · NHẢY / LEO'
       : '<kbd>W A S D</kbd> di chuyển · <kbd>Space</kbd> nhảy (giữ lâu nhảy cao) / leo lên · <kbd>E</kbd>/<kbd>Shift</kbd> buông mép, trèo xuống mép · Chuột: xoay camera · Cuộn: zoom · <kbd>Esc</kbd> tạm dừng';
     const img = (k: string) => (portraits[k] ? `<img src="${portraits[k]}" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:12px;display:block;margin:0 auto">` : '');
     this.menu.innerHTML = `

@@ -113,6 +113,7 @@ export function referencedFiles(d) {
   }
   if ((d.pads ?? []).some((p) => p.t === 'jump')) bases.add(d.padModel?.file ?? PAD_MODEL);
   if (d.atlas) bases.add(d.atlas);
+  for (const dv of d.devices ?? []) if (dv.model?.file) bases.add(dv.model.file);
   const out = new Set();
   for (const b of bases) for (const ext of ['.glb', '.col.bin', '.webp', '.json']) out.add(b + ext);
   return out;
@@ -125,6 +126,7 @@ export function mechanicsOf(d) {
   for (const p of d.pads ?? []) m.add(p.t === 'speed' ? 'speed-pad' : 'jump-pad');
   if ((d.rings ?? []).length) m.add('speed-ring');
   for (const mv of d.movers ?? []) m.add(`mover:${mv.kind}`);
+  for (const dv of d.devices ?? []) m.add(dv.t);
   return [...m].sort();
 }
 function entryData(p) { try { return JSON.parse(fs.readFileSync(path.join(p.root, p.meta.entry), 'utf8')); } catch { return {}; } }

@@ -2,10 +2,12 @@
 // real colliders and the real moving platforms (deterministic sim time), including ladders, pads, rings,
 // riding the crane and hover platforms.
 // Usage: node devtools/bot2.cjs [route] [k]   (k = single pair index, prints a state trace)
+//   ROUTES=routes003.json MAP=map003 node devtools/bot2.cjs   (another map's routes; MAP = map the world is centred on)
 const { chromium } = require('playwright');
 const fs = require('fs');
 (async () => {
-  const routes = JSON.parse(fs.readFileSync(__dirname + '/out/routes002.json', 'utf8'));
+  const routes = JSON.parse(fs.readFileSync(__dirname + '/out/' + (process.env.ROUTES || 'routes002.json'), 'utf8'));
+  const MAP = process.env.MAP || null;
   const only = process.argv[2];
   const onlyK = process.argv[3] ? parseInt(process.argv[3]) : -1;
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -13,7 +15,7 @@ const fs = require('fs');
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   await page.goto('http://127.0.0.1:5173/');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 240000 });
-  await page.evaluate(async () => { const g = window.__game; g.renderer.setAnimationLoop(null); await g.loadOtherMaps(); });
+  await page.evaluate(async (MAP) => { const g = window.__game; g.renderer.setAnimationLoop(null); await g.loadOtherMaps(MAP || undefined); }, MAP);
   await page.evaluate(() => { const g = window.__game; g.renderer.setAnimationLoop(null); g.state = 'playing'; g.input.enabled = true; });
   const res = await page.evaluate(({ routes, only, onlyK, verbose }) => {
     const g = window.__game, P = g.player, I = g.input, V = P.pos.constructor;
@@ -36,6 +38,7 @@ const fs = require('fs');
       const r = mv.nextPark(sim, k);
       return sim + r.in;
     };
+    const RIDE = new Set(['crane', 'hover', 'rotor', 'swing']);
     const out = {};
     let unstuck = 0;
     for (const [name, pts] of Object.entries(routes)) {
@@ -54,9 +57,9 @@ const fs = require('fs');
           const [kindA, midA] = actA.split(':');
           const mv = mid ? movers[mid] : null;
           // align moving platforms: boarding waits ~1.5 s, a ride starts with the platform parked at A
-          if ((kind === 'crane' || kind === 'hover') && end === 'A') sim = parkStart(mv, 0) - 1.2 - attempt * 0.8;
-          if ((kind === 'crane' || kind === 'hover') && end === 'B') sim = parkStart(mv, 0) + 0.3;
-          if ((kindA === 'crane' || kindA === 'hover') && actA.endsWith(':B')) { const m2 = movers[midA]; sim = parkStart(m2, 1) + 0.2; }
+          if (RIDE.has(kind) && end === 'A') sim = parkStart(mv, 0) - (kind === 'swing' ? 0.9 + attempt * 0.25 : 1.2 + attempt * 0.8);
+          if (RIDE.has(kind) && end === 'B') sim = parkStart(mv, 0) + (kind === 'swing' ? 0.05 : 0.3);
+          if (RIDE.has(kindA) && actA.endsWith(':B')) { const m2 = movers[midA]; sim = parkStart(m2, 1) + (kindA === 'swing' ? -0.45 : 0.2); }
           g.maps.stepMovers(sim, dt); g.maps.stepMovers(sim, dt);
           P.teleport(new V(A[0], A[1] + 0.3, A[2]), 0);
           I.touchMoveX = 0; I.touchMoveY = 0; I.touchJumpHeld = false; I.clearEdges();
@@ -64,22 +67,23 @@ const fs = require('fs');
           const sf = new V(P.pos.x, P.pos.y - 0.8, P.pos.z);
           if (P.state !== 'air' && P.state !== 'ground' && P.state !== 'ladder' && Math.abs(sf.y - A[1]) > 0.6) { why = `start not standable (state ${P.state} y ${sf.y.toFixed(2)} vs ${A[1]})`; continue; }
           if (P.state === 'ground' && Math.abs(sf.y - A[1]) > 0.7) { why = `start not standable (y ${sf.y.toFixed(2)} vs ${A[1]})`; continue; }
-          let t = 0, holdJump = 0, lastJump = -1, stuckT = 0, hangDropped = false, prevVy = 0; // caught a ledge far above the target: let go once, like a player would
+          let letGo = 0, t = 0, holdJump = 0, lastJump = -1, stuckT = 0, hangDropped = false, prevVy = 0; // caught a ledge far above the target: let go once, like a player would
           segPad = false;
           const nextAct = pts[k + 2]?.act || '';
           const edgeProbe = [0.45, 0.25, 0.65][attempt];
-          const tmax = kind === 'crane' || kind === 'hover' ? 40 : kind === 'ladder' ? 14 : 7;
+          const tmax = RIDE.has(kind) ? 40 : kind === 'ladder' ? 16 : 7;
           while (t < tmax) {
             const feet = new V(P.pos.x, P.pos.y - 0.8, P.pos.z);
             const dx = B[0] - feet.x, dz = B[2] - feet.z, dist = Math.hypot(dx, dz);
-            const camYaw = Math.atan2(-dx, -dz);
+            // letting go of a ledge = holding the stick away from the wall (forward along the ledge normal)
+            const camYaw = letGo > 0 && P.state === 'hang' && P.ledge ? Math.atan2(-P.ledge.normal.x, -P.ledge.normal.z) : Math.atan2(-dx, -dz);
             I.touchMoveX = 0;
             let skipJump = false;
-            if (kind === 'crane' || kind === 'hover') {
+            if (RIDE.has(kind)) {
               if (end === 'A') {
-                // wait on the edge until the platform is parked, then step aboard
+                // wait on the edge until the platform is parked, then step aboard (a swing: go just before it arrives)
                 const r = mv.nextPark(sim, 0);
-                const parked = r.in === 0 && r.stay > 0.6;
+                const parked = kind === 'swing' ? (r.in === 0 && r.stay > 0.25) || (r.in > 0 && r.in < 0.25) : r.in === 0 && r.stay > 0.6;
                 I.touchMoveY = parked ? (dist > 0.35 ? 1 : 0) : 0;
                 if (!parked) skipJump = true;
               } else {
@@ -100,7 +104,8 @@ const fs = require('fs');
             } else I.touchMoveY = dist > 0.35 ? (dist < 0.9 && B[1] - feet.y < 0.4 ? 0.45 : 1) : 0;
             I.touchJumpHeld = holdJump > 0;
             holdJump -= dt;
-            if (P.state === 'hang') { if (P.ledge && P.ledge.y - B[1] > 1.2 && !hangDropped && prevVy < -1) { I.pressDrop(); hangDropped = true; } else if (t - lastJump > 0.3) { I.pressJump(); lastJump = t; } }
+            if (P.state === 'hang' && letGo > 0) { I.touchMoveY = 1; letGo -= dt; }
+            else if (P.state === 'hang') { if (P.ledge && P.ledge.y - B[1] > 1.2 && !hangDropped && prevVy < -1) { hangDropped = true; letGo = 0.5; } else if (t - lastJump > 0.3) { I.pressJump(); lastJump = t; } }
             else if (P.state === 'ground' && t - lastJump > 0.35 && !skipJump) {
               const nx = dx / (dist || 1), nz = dz / (dist || 1);
               const ahead = new V(feet.x + nx * edgeProbe, feet.y + 0.3, feet.z + nz * edgeProbe);
@@ -121,11 +126,11 @@ const fs = require('fs');
             if (ok) break;
             if (kind === 'topad' && segPad) { ok = true; break; }
             if (nextAct === 'ladder' && P.state === 'ladder') { ok = true; break; }
-            if ((kind === 'crane' || kind === 'hover') && end === 'A' && P.riding && P.riding.data.id === mid && P.state === 'ground') { ok = true; break; }
+            if (RIDE.has(kind) && end === 'A' && P.riding && P.riding.data.id === mid && P.state === 'ground') { ok = true; break; }
             const f2 = new V(P.pos.x, P.pos.y - 0.8, P.pos.z);
             const d2 = Math.hypot(B[0] - f2.x, B[2] - f2.z);
-            const tol = kind === 'crane' || kind === 'hover' ? 1.6 : 1.0;
-            if (kind !== 'crane' && kind !== 'hover' || end === 'A') {
+            const tol = RIDE.has(kind) ? 1.6 : 1.0;
+            if (!RIDE.has(kind) || end === 'A') {
               if (P.state === 'ground' && d2 < tol && f2.y > B[1] - 0.45 - (pts[k + 1].label === 'EXIT' ? 1 : 0) && f2.y < B[1] + 1.6) { ok = true; break; }
             }
             if (f2.y < Math.min(A[1], B[1]) - 2.5) { why = `fell to ${f2.y.toFixed(1)} (d ${d2.toFixed(1)})`; break; }

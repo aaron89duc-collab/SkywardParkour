@@ -10,6 +10,8 @@ export type SaveData = {
   bestTimes?: Record<string, number>; // per map: seconds from the run start to that map's exit
   tips?: number; // how many times the hang tutorial was shown
   slipTips?: number; // how many times the "pull back to save a misstep" tip was shown
+  /** optional pickups collected (device ids, map-qualified: map003:gem1) */
+  collected?: string[];
   /** player name + device identity for the online leaderboard (made on the device, no account needed) */
   profile?: { name: string; id: string; token: string; tag?: string };
   /** signature of the results last accepted by the leaderboard server (resubmit when they improve) */

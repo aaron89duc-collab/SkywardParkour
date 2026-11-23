@@ -13,7 +13,8 @@ const { chromium } = require('playwright');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 180000 });
   await page.waitForTimeout(800);
   await page.screenshot({ path: prefix + '_menu.png' });
-  await page.evaluate(() => window.__game.start());
+  await page.evaluate((m) => window.__game.start(m || undefined), process.env.START || null);
+  await page.waitForTimeout(+(process.env.WAIT0 || 0));
   for (let i = 0; i < shots.length; i++) {
     const s = shots[i];
     await page.evaluate((s) => { const g = window.__game; const V = g.player.pos.constructor; g.player.teleport(new V(s.p[0], s.p[1], s.p[2]), s.yaw ?? 0); g.cam.snapTo(new V(s.p[0], s.p[1], s.p[2]), s.cy ?? ((s.yaw ?? 0) + Math.PI)); g.cam.pitch = s.pitch ?? 0.3; g.cam.distance = s.dist ?? 7; }, s);

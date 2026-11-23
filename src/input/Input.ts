@@ -80,7 +80,6 @@ export class Input {
       this.keys.add(k);
       this.lastInputTime = performance.now();
       if (k === 'Space') this.pressJump(e.timeStamp);
-      if (k === 'KeyE' || k === 'ShiftLeft' || k === 'ShiftRight') this.dropLatch = true;
       if (k === 'Escape' || k === 'KeyP') this.pauseLatch = true;
     } else {
       this.keys.delete(k);
@@ -117,6 +116,7 @@ export class Input {
   pressJump(at = performance.now()) { this.jumpLatch = true; this.lastInputTime = performance.now(); this.jumpDownAt = at; this.heldFor = null; }
   releaseJump(at = performance.now()) { if (this.jumpDownAt >= 0) this.heldFor = Math.max(0, (at - this.jumpDownAt) / 1000); this.jumpDownAt = -1; }
   consumeHeldFor() { const v = this.heldFor; this.heldFor = null; return v; }
+  /** admin fly mode only (touch XUỐNG); gameplay has no drop button: run, steer and jump */
   pressDrop() { this.dropLatch = true; }
   /** raw key state (admin fly controls) */
   isDown(code: string) { return this.keys.has(code); }

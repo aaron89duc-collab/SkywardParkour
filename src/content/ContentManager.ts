@@ -1,6 +1,7 @@
 import { ContentStore, type ContentState, type InstalledPack, type RemoteManifest, type RemoteMap } from './ContentStore';
 import { sha256Async } from '../systems/sha256';
 import type { MapRegistryEntry } from '../world/MapTypes';
+import { DEVICE_TYPES } from '../world/Devices';
 
 /**
  * Download Once – Play Offline – Update When Online.
@@ -24,7 +25,7 @@ import type { MapRegistryEntry } from '../world/MapTypes';
  * The game keeps using the same logical paths (maps/map002.json, assets/map002/x.glb): installed packs are
  * mounted under them and served from storage as blob: URLs.
  */
-export const APP_CONTENT_VERSION = 2; // 2: swinging / turning movers, map pad models, multi-height rings (Map 003)
+export const APP_CONTENT_VERSION = 3; // 2: swinging / turning movers, map pad models (Map 003); 3: gameplay devices
 
 const BASE = import.meta.env.BASE_URL;
 const ENV_URL = (import.meta.env.VITE_CONTENT_URL as string | undefined)?.trim();
@@ -34,6 +35,7 @@ export const CONTENT_URL = ENV_URL ? (ENV_URL.endsWith('/') ? ENV_URL : ENV_URL 
 export const MECHANICS = new Set([
   'ladder', 'jump-pad', 'speed-pad', 'speed-ring', 'ledge',
   'mover:crane', 'mover:hover', 'mover:swing', 'mover:rotor',
+  ...DEVICE_TYPES,
 ]);
 export const supports = (m: { minApp?: number; mechanics?: string[] }) => (m.minApp ?? 1) <= APP_CONTENT_VERSION && (m.mechanics ?? []).every((x) => MECHANICS.has(x));
 

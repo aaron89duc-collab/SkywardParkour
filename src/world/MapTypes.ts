@@ -165,6 +165,8 @@ export interface MapData {
   waypoints?: { label: string; p: V3 }[];
   /** the map's own jump-pad model (default: Map 002's): file without .glb, normalised w x d, pad surface height */
   padModel?: { file: string; w: number; d: number; top: number };
+  /** gameplay devices (crumbling floors, conveyors, fans, ziplines ...): see src/world/Devices.ts */
+  devices?: import('./Devices').DeviceData[];
   /** sprite atlas (logical path without extension); default: Map 001's */
   atlas?: string;
   /** models of the moving-platform looks this map uses (logical paths without .glb), overriding the engine's

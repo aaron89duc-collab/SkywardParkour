@@ -21,7 +21,8 @@ needs an app release, as long as the map only uses mechanics the app already has
               "requires": [], "summary": "…", "size": 21000000, "files": 61,
               "pack": "<sha256 of the pack manifest>" } ] }
 ```
-About 300 bytes per map: 500 maps ≈ 150 KB (≈ 20 KB gzipped).
+About 300 bytes per map: 500 maps ≈ 150 KB (≈ 20 KB gzipped). `mechanics` uses the ids of `docs/MECHANICS.md`
+(movers and devices alike: `mover:swing`, `crumble`, `zipline` …).
 
 ### Pack manifest (`files/<pack>`)
 ```json

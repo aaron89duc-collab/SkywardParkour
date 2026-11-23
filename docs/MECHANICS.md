@@ -1,7 +1,8 @@
 # Skyward Parkour – mechanics system (a few dozen mechanics → hundreds of maps)
 
-**Rule 1 – the controls never grow.** Move + jump (ledge grab, hang and mantle are automatic). Every new
-challenge comes from an object in the world.
+**Rule 1 – the controls never grow.** Run, steer and jump. Ledge grab, hang and mantle are automatic; letting go
+of a ledge is holding the stick away from the wall (there is no drop button). Every new challenge comes from an
+object in the world that moves or reacts to the player.
 
 **Rule 2 – the engine ships mechanics, maps are data.** A mechanic is code with a stable id
 (`mover:swing`, `jump-pad` …), a JSON parameter set, and a *look* (GLB + solid boxes) that any map can replace.
@@ -13,45 +14,51 @@ step of the route with the real controller).
 
 ## 1. Mechanic catalog
 
-Ids marked ✅ exist (listed in `MECHANICS`, `src/content/ContentManager.ts`). The others are the backlog, roughly in
-order of value. Each one: what the player meets → the knobs that set the difficulty.
+All of these exist in the engine (`MECHANICS` in `src/content/ContentManager.ts`). Movers live in
+`src/world/Movers.ts` (`movers` in the map JSON), devices in `src/world/Devices.ts` (`devices` in the map JSON).
+Every device is checked by `devtools/devices.cjs` (20/20) with the real player controller.
 
-| # | Id | Player experience | Difficulty knobs |
+| # | Id | Player experience | Main parameters |
 |---|---|---|---|
-| 1 | ✅ `ledge` | grab, hang, shimmy, mantle; edge slip / reflex save | ledge height, gap, catch window |
-| 2 | ✅ `ladder` | climb up | height, what waits at the top |
-| 3 | ✅ `jump-pad` | launched to a marked spot | launch speed, target height / distance, chained pads |
-| 4 | ✅ `speed-pad` | dash forward | dash speed, run-out length |
-| 5 | ✅ `speed-ring` | fly through a hoop, get boosted | ring size, chain spacing |
-| 6 | ✅ `mover:crane` | ride a load along a path | path, speed, wait |
-| 7 | ✅ `mover:hover` | ride a platform (looks: hover, pallet, lift car, trolley) | distance, speed, wait at ends, phase |
-| 8 | ✅ `mover:swing` | ride a pendulum container, leap at the extremes | cable length, amplitude, period, two in anti-phase |
-| 9 | ✅ `mover:rotor` | ride a turning arm (crane jib) | sweep angle, speed, wait |
-| 10 | `crumble` | platform drops 0.6–1.5 s after you land, comes back | delay, respawn time, chain length |
-| 11 | `blink` | platforms appear / vanish on a beat (groups in sequence) | on/off time, phase per group |
-| 12 | `conveyor` | the floor carries you (with or against your run) | belt speed, direction, length |
-| 13 | `turntable` | spinning disc (carry + rotation) | radius, angular speed, gaps between discs |
-| 14 | `tilt` | seesaw / tilting deck under your weight | max angle, return speed, friction |
-| 15 | `piston` | blocks punch out of walls on a cycle (push / stepping stones) | stroke, period, phase |
-| 16 | `sweeper` | rotating bar knocks you off narrow paths (jump it) | bar height, speed, number of arms |
-| 17 | `fan` | wind zone: lifts or pushes you | force, area, on/off cycle |
-| 18 | `slippery` | ice / oil: low grip, long slides | friction, slope |
-| 19 | `trampoline` | bouncy surface: height grows with fall height | restitution, max height |
-| 20 | `zipline` | run into the cable → slide; jump to let go | slope, speed, drop-off point |
-| 21 | `moving-ledge` | hang from a moving object and ride it | path, speed (ledges on movers) |
-| 22 | `plate` | stand on a plate → a bridge / lift / door moves | target, delay, hold time |
-| 23 | `elevator-call` | lift that starts when you step on (not on a timer) | travel, speed |
-| 24 | `cannon` | step in → launched along a fixed arc | arc, landing size |
-| 25 | `drop` | crates / loads fall on a schedule (dodge, or ride down) | interval, warning time |
-| 26 | `portal` | paired gates teleport you (keeps momentum) | exit direction, speed kept |
-| 27 | `low-gravity` | zone with lighter gravity (huge jumps) | gravity scale |
-| 28 | `one-way` | platforms you jump up through | — (combine with others) |
-| 29 | `checkpoint` | flag that sets the respawn point inside long maps | spacing |
-| 30 | `collectible` | optional pickups on the hard line (score, achievements) | placement risk |
+| 1 | `ledge` | grab, hang, shimmy, mantle; let go by holding the stick away from the wall; edge slip / reflex save | – |
+| 2 | `ladder` | climb up / down, jump off | height |
+| 3 | `jump-pad` | launched to a marked spot | `v`, `tg` |
+| 4 | `speed-pad` | dash forward | `v` |
+| 5 | `speed-ring` | fly through a hoop, get boosted | `s`, `v` |
+| 6 | `mover:crane` | ride a load along a path | `pts`, `speed`, `wait` |
+| 7 | `mover:hover` | ride a platform (looks: hover, pallet, lift car, trolley); hang from its edge and ride | `pts`, `speed`, `wait`, `phase` |
+| 8 | `mover:swing` | ride a pendulum container, leap at the extremes | `len`, `amp`, `period`, `phase` |
+| 9 | `mover:rotor` | ride a turning arm (crane jib) | `a0`, `a1`, `speed`, `wait` |
+| 10 | `crumble` | platform shakes when you land and drops after `delay` s, comes back after `respawn` s | `delay`, `respawn` |
+| 11 | `blink` | platform solid for `on` s, gone for `off` s (flickers 0.5 s before) | `on`, `off`, `phase` |
+| 12 | `conveyor` | the floor carries you along its length | `speed` (m/s, local +z) |
+| 13 | `turntable` | spinning disc: carries and turns you | `radius`, `speed` (deg/s) |
+| 14 | `tilt` | deck leans towards the end you stand on, springs back | `maxAngle` |
+| 15 | `piston` | block slides out of a wall on a cycle and shoves you; ride on top | `stroke`, `period`, `wait`, `phase` |
+| 16 | `sweeper` | rotating bar at shin height knocks you off: jump it | `radius`, `speed`, `arms` |
+| 17 | `fan` | updraft (or `dir: forward` wind) lifts / pushes you | `s` (stream size), `force`, `on`/`off` |
+| 18 | `slippery` | ice: almost no grip, long slides | `grip` |
+| 19 | `trampoline` | bounces you back up with most of your landing speed | `bounce`, `min`, `max` |
+| 20 | `zipline` | jump into the cable → slide down it; jump to let go | `p` → `b`, `speed` |
+| 21 | `plate` | stand on it → its `target` piston slides out / elevator comes | `target`, `hold` |
+| 22 | `elevator` | waits until you step on, rides to `b`, waits, comes back | `b`, `speed`, `wait` |
+| 23 | `cannon` | walk in → fired along a fixed arc | `r`, `pitch`, `v` |
+| 24 | `drop` | crates fall on a schedule: dodge them or ride one down | `fall`, `speed`, `interval` |
+| 25 | `portal` | step in → come out of the exit gate with your speed, turned | `b`, `rb` |
+| 26 | `lowgrav` | zone of light gravity: huge jumps | `s`, `g` |
+| 27 | `oneway` | platform you jump up through from below | – |
+| 28 | `checkpoint` | flag: falling out of the map brings you back here (Adventure) | – |
+| 29 | `collectible` | optional gem on the risky line (saved per map) | `id` |
 
 ## 2. How a map uses a mechanic (data only)
 
-Every instance in the map JSON carries its parameters and, optionally, its own look:
+A device entry (`devices` in the map JSON): `t` = id, `p` = top centre (platforms) or base (volumes, triggers),
+`s` = size [w, h, d], `r` = yaw, plus its parameters, and optionally `model` = GLB look:
+```json
+{ "t": "crumble", "id": "c1", "p": [-50, 431, -12], "s": [3, 0.5, 3], "delay": 0.8, "respawn": 3,
+  "model": { "file": "assets/map004/rusty_grate", "s": 3 } }
+```
+Movers carry their parameters and, optionally, their own look:
 ```json
 { "id": "S7", "kind": "swing", "pivot": [-64, 482, -14], "len": 6.5, "amp": 24, "period": 6.4, "phase": 3.2,
   "model": { "file": "assets/map014/ice_gondola", "s": 5.5,

@@ -22,13 +22,14 @@ export class TouchControls {
       <div class="touch-stick-zone"></div>
       <div class="touch-look-zone"></div>
       <div class="stick-base"><div class="stick-knob"></div></div>
-      <button class="tbtn tbtn-drop" aria-label="Thả">THẢ</button>
+      <button class="tbtn tbtn-drop" aria-label="Xuống">XUỐNG</button>
       <button class="tbtn tbtn-jump" aria-label="Nhảy">NHẢY</button>`;
     parent.appendChild(this.root);
     this.stickBase = this.root.querySelector('.stick-base') as HTMLDivElement;
     this.stickKnob = this.root.querySelector('.stick-knob') as HTMLDivElement;
     this.jumpBtn = this.root.querySelector('.tbtn-jump') as HTMLButtonElement;
     this.dropBtn = this.root.querySelector('.tbtn-drop') as HTMLButtonElement;
+    this.dropBtn.style.display = 'none';
     const stickZone = this.root.querySelector('.touch-stick-zone') as HTMLDivElement;
     const lookZone = this.root.querySelector('.touch-look-zone') as HTMLDivElement;
 
@@ -167,17 +168,17 @@ export class TouchControls {
   }
 
   private fly = false;
-  /** admin fly mode: hold NHẢY to rise, THẢ to sink */
+  /** admin fly mode: hold LÊN to rise, XUỐNG to sink (the only use of the second button) */
   setFly(on: boolean) {
     this.fly = on;
     this.jumpBtn.textContent = on ? 'LÊN' : 'NHẢY';
-    this.dropBtn.textContent = on ? 'XUỐNG' : 'THẢ';
+    this.dropBtn.textContent = 'XUỐNG';
+    this.dropBtn.style.display = on ? '' : 'none'; // gameplay: no drop button (run, steer, jump)
   }
 
   setHanging(h: boolean) {
     if (this.fly) return;
     this.jumpBtn.textContent = h ? 'LEO' : 'NHẢY';
-    this.dropBtn.classList.toggle('emph', h);
   }
 }
 

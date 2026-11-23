@@ -44,6 +44,7 @@ export const PHYS = {
     regrabCooldown: 0.45,
     climbTime: 0.95,
     lowerTime: 0.75, // climbing down from a top into a hang
+    letGoTime: 0.45, // hanging: hold the stick away from the wall this long to let go (no drop button)
     maxUpVelocity: 7.0,
     assist: 0.2, // smart grab: ledge up to this much above reach at the apex, or this far to the side, still catches
     // missteps: walking over an edge is a fall, not an automatic hang. A quick pull back toward the edge saves it.

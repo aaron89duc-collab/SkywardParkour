@@ -32,13 +32,14 @@ const fs = require('fs');
           for (let i = 0; i < 40; i++) step(0);
           const startFeet = P.renderPos.clone(); startFeet.copy(P.pos); startFeet.y -= 0.8;
           if (Math.abs(startFeet.y - A[1]) > 0.6) { why = `start not standable (y ${startFeet.y.toFixed(2)} vs ${A[1]})`; continue; }
-          let t = 0, holdJump = 0, lastJump = -1, stuckT = 0, hangDropped = false, prevVy = 0; // caught a ledge far above the target: let go once, like a player would
+          let letGo = 0, t = 0, holdJump = 0, lastJump = -1, stuckT = 0, hangDropped = false, prevVy = 0; // caught a ledge far above the target: let go once, like a player would
           // attempt variants: different jump trigger distance
           const edgeProbe = [0.45, 0.25, 0.65][attempt];
           while (t < 6) {
             const feet = new V(P.pos.x, P.pos.y - 0.8, P.pos.z);
             const dx = B[0] - feet.x, dz = B[2] - feet.z, dist = Math.hypot(dx, dz);
-            const camYaw = Math.atan2(-dx, -dz);
+            // letting go of a ledge = holding the stick away from the wall (forward along the ledge normal)
+            const camYaw = letGo > 0 && P.state === 'hang' && P.ledge ? Math.atan2(-P.ledge.normal.x, -P.ledge.normal.z) : Math.atan2(-dx, -dz);
             if (P.state === 'air') {
               // competent air control: steer so the landing point matches the target
               const vy = P.vel.y, g = vy > 0 ? 30 : 42, h = feet.y - B[1];
@@ -50,7 +51,8 @@ const fs = require('fs');
             } else I.touchMoveY = dist > 0.35 ? (dist < 0.9 && B[1] - feet.y < 0.4 ? 0.45 : 1) : 0;
             I.touchJumpHeld = holdJump > 0;
             holdJump -= dt;
-            if (P.state === 'hang') { if (P.ledge && P.ledge.y - B[1] > 1.2 && !hangDropped && prevVy < -1) { I.pressDrop(); hangDropped = true; } else I.pressJump(); }
+            if (P.state === 'hang' && letGo > 0) { I.touchMoveY = 1; letGo -= dt; }
+            else if (P.state === 'hang') { if (P.ledge && P.ledge.y - B[1] > 1.2 && !hangDropped && prevVy < -1) { hangDropped = true; letGo = 0.5; } else I.pressJump(); }
             else if (P.state === 'ground' && t - lastJump > 0.35) {
               const nx = dx / (dist || 1), nz = dz / (dist || 1);
               const ahead = new V(feet.x + nx * edgeProbe, feet.y + 0.3, feet.z + nz * edgeProbe);

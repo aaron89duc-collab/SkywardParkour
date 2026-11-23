@@ -4,20 +4,32 @@ import { PHYS, COLLISION } from '../config';
 import { Physics } from '../core/Physics';
 import { Input } from '../input/Input';
 import { CharacterModel, type AnimName } from './CharacterModel';
-import type { Mover } from '../world/Movers';
+import type { Carrier, Surface, DeviceAction } from '../world/Devices';
 import type { Pad, Ring, Ladder } from '../world/Boosters';
 
 /** Queries into dynamic world features (moving platforms, pads, rings, ladders) across all loaded maps. */
 export interface WorldHooks {
-  moverOf(c: RAPIER.Collider | null | undefined): Mover | null;
+  moverOf(c: RAPIER.Collider | null | undefined): Carrier | null;
+  /** gameplay devices (optional): surface grip / bounce, "stood on" notices, force fields, pushes, triggers */
+  surfaceOf?(c: RAPIER.Collider | null | undefined): Surface | null;
+  stood?(c: RAPIER.Collider | null | undefined, feet: THREE.Vector3): void;
+  field?(feet: THREE.Vector3, out: { g: number; acc: THREE.Vector3 }): void;
+  push?(feet: THREE.Vector3, out: { d: THREE.Vector3; v: THREE.Vector3 }): boolean;
+  touch?(feet: THREE.Vector3, vel: THREE.Vector3, airborne: boolean): DeviceAction | null;
   padOf(c: RAPIER.Collider | null | undefined): Pad | null;
   ringCrossed(a: THREE.Vector3, b: THREE.Vector3): Ring | null;
   ladders(): Ladder[];
 }
 
-export type PlayerState = 'ground' | 'air' | 'hang' | 'move' | 'land' | 'roll' | 'ladder';
+export type PlayerState = 'ground' | 'air' | 'hang' | 'move' | 'land' | 'roll' | 'ladder' | 'zip';
 export type PlayerEvent =
   | { type: 'jump' }
+  | { type: 'bounce'; speed: number }
+  | { type: 'knock' }
+  | { type: 'portal' }
+  | { type: 'zip' }
+  | { type: 'checkpoint'; p: THREE.Vector3; yaw: number; id: string }
+  | { type: 'collect'; id: string }
   | { type: 'land'; drop: number; speed: number }
   | { type: 'grab' }
   | { type: 'catch'; speed: number }
@@ -39,7 +51,7 @@ export type PlayerEvent =
   | { type: 'ring' }
   | { type: 'ladder' };
 
-type Ledge = { edge: THREE.Vector3; normal: THREE.Vector3; y: number; rel: number; canClimb: boolean; standY: number; standOff: number; hangCenter: THREE.Vector3 | null; mover: Mover | null };
+type Ledge = { edge: THREE.Vector3; normal: THREE.Vector3; y: number; rel: number; canClimb: boolean; standY: number; standOff: number; hangCenter: THREE.Vector3 | null; mover: Carrier | null };
 type MoveKind = 'climb' | 'mantle' | 'lower' | 'vault' | 'push' | 'shimmy';
 type Move = {
   kind: MoveKind;
@@ -56,6 +68,7 @@ type Move = {
 };
 
 const FEET = PHYS.capsuleHalfHeight + PHYS.capsuleRadius; // capsule center -> feet
+const _feet = new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0);
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
@@ -100,7 +113,12 @@ export class Player {
   frozen = false;
   hooks: WorldHooks | null = null;
   /** moving platform under the feet (carried along every tick) */
-  riding: Mover | null = null;
+  riding: Carrier | null = null;
+  /** devices: grip of the surface stood on (ice < 1), force field at the feet, pushes, zipline ride */
+  private grip = 1;
+  private fieldOut = { g: 1, acc: new THREE.Vector3() };
+  private pushOut = { d: new THREE.Vector3(), v: new THREE.Vector3() };
+  zip: { a: THREE.Vector3; dir: THREE.Vector3; L: number; s: number; v: number; max: number; id: string } | null = null;
   /** horizontal speed actually achieved last tick (walls included) */
   actualSpeed = 0;
   ladder: Ladder | null = null;
@@ -159,6 +177,8 @@ export class Player {
   private padCharge: { pad: Pad; t: number } | null = null;
   /** flying after a pad launch: momentum is kept, steering is partial */
   padFlight: { maxSpeed: number; t: number } | null = null;
+  /** how long the stick has been held away from the wall while hanging (let go at PHYS.ledge.letGoTime) */
+  private letGoT = 0;
   private ladderCool = 0;
   private ladderV = 0;
 
@@ -199,6 +219,7 @@ export class Player {
     this.state = 'air';
     this.ledge = null;
     this.move = null;
+    this.zip = null;
     this.airTime = 0;
     this.fallPeakY = feet.y;
     this.regrab = 0.3;
@@ -271,7 +292,10 @@ export class Player {
     }
 
     this.applyCarry();
+    const free = this.state === 'ground' || this.state === 'air' || this.state === 'land' || this.state === 'roll';
+    if (free && this.hooks?.push) this.devicePush();
     switch (this.state) {
+      case 'zip': this.updateZip(dt); break;
       case 'hang': this.updateHang(dt, dropPressed); break;
       case 'move': this.updateMove(dt); break;
       case 'ladder': this.updateLadder(dt, input, dropPressed); break;
@@ -280,6 +304,8 @@ export class Player {
     if (this.hooks && (this.state === 'air' || this.state === 'ground' || this.state === 'roll')) {
       const ring = this.hooks.ringCrossed(this.prevPos, this.pos);
       if (ring) this.hitRing(ring);
+      const act = this.hooks.touch?.(_feet.set(this.pos.x, this.pos.y - FEET, this.pos.z), this.vel, this.state === 'air');
+      if (act) this.deviceAction(act);
     }
 
     if (this.state === 'air' && this.lastState !== 'air') this.airBaseY = this.jumpedThisTick ? this.jumpBaseY : this.prevPos.y - FEET;
@@ -303,14 +329,7 @@ export class Player {
       if (this.rollT >= PHYS.roll.time) this.state = this.grounded ? 'ground' : 'air';
     }
 
-    // climb down into a hang (THẢ / E at an edge)
-    if (dropPressed && this.state === 'ground' && this.grounded) {
-      const f = _v.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)).clone();
-      const dirs = [f];
-      if (wishLen > 0.2) dirs.unshift(this.wish.clone());
-      dirs.push(f.clone().negate(), new THREE.Vector3(-f.z, 0, f.x), new THREE.Vector3(f.z, 0, -f.x));
-      for (const d of dirs) if (this.tryLowerAt(d, false)) return;
-    }
+    void dropPressed; // no drop button: controls are run, steer and jump
 
     // jump pad pressed down: hold still for the squash, then launch
     if (this.padCharge) {
@@ -350,7 +369,7 @@ export class Player {
       } else target = _v.copy(this.wish).multiplyScalar(wishLen * maxSp * control);
       let accel: number;
       if (pf) accel = 12; // steer the flight, never snap it
-      else if (this.grounded) accel = wishLen > 0.05 ? PHYS.groundAccel : PHYS.groundDecel;
+      else if (this.grounded) accel = (wishLen > 0.05 ? PHYS.groundAccel : PHYS.groundDecel) * this.grip; // ice: little grip
       else accel = wishLen > 0.05 ? PHYS.airAccel : PHYS.airDecel;
       const diff = target.sub(hv);
       const dl = diff.length();
@@ -405,9 +424,17 @@ export class Player {
     }
     if (this.vel.y <= 0) this.jumping = false;
 
+    // --- force fields (fans, low gravity)
+    this.fieldOut.g = 1; this.fieldOut.acc.set(0, 0, 0);
+    this.hooks?.field?.(_feet.set(this.pos.x, this.pos.y - FEET, this.pos.z), this.fieldOut);
+    const facc = this.fieldOut.acc;
+    if (facc.lengthSq() > 0) {
+      this.vel.x += facc.x * dt; this.vel.z += facc.z * dt;
+      if (facc.y > 0) { this.vel.y = Math.max(this.vel.y, this.grounded ? 0 : this.vel.y) + facc.y * dt; if (this.vel.y > 0.5) { this.grounded = false; if (this.state === 'ground') this.state = 'air'; } }
+    }
     // --- gravity
     if (!this.grounded || this.vel.y > 0) {
-      let g = this.vel.y > 0 ? PHYS.gravityUp : PHYS.gravityDown;
+      let g = (this.vel.y > 0 ? PHYS.gravityUp : PHYS.gravityDown) * this.fieldOut.g;
       if (this.slipT > 0) { g *= PHYS.ledge.slipGravity; this.slipT = Math.max(0, this.slipT - dt); }
       this.vel.y = Math.max(-PHYS.terminalVelocity, this.vel.y - g * dt);
     } else this.vel.y = -1.5;
@@ -477,6 +504,10 @@ export class Player {
       if (this.hooks) {
         const g = this.physics.raycast(new THREE.Vector3(this.pos.x, this.feetY + 0.15, this.pos.z), DOWN, 0.5);
         this.riding = this.hooks.moverOf(g?.collider);
+        const surf = this.hooks.surfaceOf?.(g?.collider) ?? null;
+        this.grip = surf?.grip ?? 1;
+        this.hooks.stood?.(g?.collider, _feet.set(this.pos.x, this.pos.y - FEET, this.pos.z));
+        if (surf?.bounce && !wasGrounded && fallSpeed > 3) { this.bounceOff(surf, fallSpeed); return; }
         const pad = this.hooks.padOf(g?.collider);
         if (pad && this.state !== 'land' && this.usePad(pad)) return;
         if (this.state === 'ground' && this.tryLadder()) return;
@@ -486,6 +517,7 @@ export class Player {
     } else {
       if (this.riding && wasGrounded && !this.jumpedThisTick) { const rv = this.riding.velAt(this.pos, dt); this.vel.x += rv.x; this.vel.z += rv.z; }
       this.riding = null;
+      this.grip = 1;
       if (wasGrounded && !this.jumpedThisTick && (this.state === 'ground' || this.state === 'roll')) {
         // stepped / ran off an edge
         this.takeoffPos.set(this.prevPos.x, this.prevPos.y - FEET, this.prevPos.z);
@@ -814,6 +846,103 @@ export class Player {
     this.physics.world.propagateModifiedBodyPositionsToColliders();
   }
 
+  /** trampoline: the landing speed comes back up (scaled), the horizontal speed is kept */
+  private bounceOff(surf: Surface, fallSpeed: number) {
+    const v = THREE.MathUtils.clamp(fallSpeed * (surf.bounce ?? 0.9), surf.min ?? 11, surf.max ?? 24);
+    this.vel.y = v;
+    this.state = 'air';
+    this.grounded = false;
+    this.jumping = false;
+    this.airTime = 0;
+    this.coyote = 0;
+    this.fallPeakY = this.feetY;
+    this.riding = null;
+    this.regrab = 0.2;
+    this.model?.play('jump', 0.05, true);
+    this.events.push({ type: 'bounce', speed: v });
+  }
+
+  /** moving hazards (pistons, sweeping bars, falling crates) shove the player out of their way */
+  private devicePush() {
+    const o = this.pushOut;
+    o.d.set(0, 0, 0); o.v.set(0, 0, 0);
+    if (!this.hooks!.push!(_feet.set(this.pos.x, this.pos.y - FEET, this.pos.z), o)) return;
+    this.pos.add(o.d);
+    this.body.setTranslation({ x: this.pos.x, y: this.pos.y, z: this.pos.z }, true);
+    this.physics.world.propagateModifiedBodyPositionsToColliders();
+    if (o.v.lengthSq() > 0.01) {
+      this.vel.copy(o.v);
+      this.state = 'air';
+      this.grounded = false;
+      this.jumping = false;
+      this.riding = null;
+      this.takeoffSlow = true;
+      this.events.push({ type: 'knock' });
+    }
+  }
+
+  /** a device trigger touched this tick */
+  private deviceAction(a: DeviceAction) {
+    if (a.kind === 'portal') {
+      // through the gate: same speed, turned to the exit's facing
+      const c = Math.cos(a.dYaw), s = Math.sin(a.dYaw);
+      const vx = this.vel.x * c + this.vel.z * s, vz = -this.vel.x * s + this.vel.z * c;
+      const vy = this.vel.y, yaw = this.yaw + a.dYaw;
+      this.teleport(a.p, yaw);
+      this.vel.set(vx, vy, vz);
+      this.regrab = 0.1;
+      this.events.push({ type: 'portal' });
+    } else if (a.kind === 'launch') {
+      this.vel.copy(a.v);
+      this.yaw = Math.atan2(a.v.x, a.v.z);
+      this.padFlight = { maxSpeed: Math.max(PHYS.runSpeed, Math.hypot(a.v.x, a.v.z) * 1.1), t: 0 };
+      this.state = 'air'; this.grounded = false; this.jumping = false; this.airTime = 0; this.coyote = 0;
+      this.fallPeakY = this.feetY; this.riding = null; this.regrab = 0.3;
+      this.model?.play('jump', 0.05, true);
+      this.events.push({ type: 'launch' });
+    } else if (a.kind === 'zip') {
+      const dir = a.b.clone().sub(a.a), L = dir.length();
+      dir.divideScalar(L);
+      const hand = _feet.set(this.pos.x, this.pos.y - FEET + 2.0, this.pos.z);
+      const s0 = THREE.MathUtils.clamp(hand.sub(a.a).dot(dir), 0, L);
+      const along = Math.max(2, this.vel.x * dir.x + this.vel.z * dir.z + this.vel.y * dir.y);
+      this.zip = { a: a.a, dir, L, s: s0, v: along, max: a.speed, id: a.id };
+      this.state = 'zip';
+      this.vel.set(0, 0, 0);
+      this.riding = null;
+      this.yaw = Math.atan2(dir.x, dir.z);
+      this.model?.play('hang', 0.1, true);
+      this.events.push({ type: 'zip' });
+    } else if (a.kind === 'checkpoint') this.events.push({ type: 'checkpoint', p: a.p, yaw: a.yaw, id: a.id });
+    else this.events.push({ type: 'collect', id: a.id });
+  }
+
+  /** sliding down a zipline: hands on the cable, speed builds up with the slope; jump to let go, off at the end */
+  private updateZip(dt: number) {
+    const z = this.zip!;
+    const slope = -z.dir.y; // > 0 going down
+    z.v = THREE.MathUtils.clamp(z.v + (PHYS.gravityDown * 0.6 * slope - 0.8) * dt, 2.5, z.max);
+    z.s += z.v * dt;
+    const end = z.s >= z.L - 0.4;
+    const hand = _feet.copy(z.a).addScaledVector(z.dir, Math.min(z.s, z.L));
+    this.pos.set(hand.x, hand.y - 2.0 + FEET, hand.z);
+    this.body.setTranslation({ x: this.pos.x, y: this.pos.y, z: this.pos.z }, true);
+    this.physics.world.propagateModifiedBodyPositionsToColliders();
+    if (this.jumpBuffer > 0 || end) {
+      const jumped = this.jumpBuffer > 0;
+      this.jumpBuffer = 0;
+      this.vel.copy(z.dir).multiplyScalar(z.v);
+      if (jumped) this.vel.y = Math.max(this.vel.y, 0) + 7;
+      this.zip = null;
+      this.state = 'air';
+      this.airTime = 0;
+      this.fallPeakY = this.feetY;
+      this.regrab = 0.35;
+      this.jumping = jumped;
+      if (jumped) this.events.push({ type: 'jump' });
+    }
+  }
+
   private usePad(pad: Pad) {
     if (pad.t === 'jump') {
       if (this.padCool > 0 || this.jumpedThisTick || this.padCharge) return false;
@@ -952,7 +1081,7 @@ export class Player {
 
   private updateLadder(dt: number, input: Input, drop: boolean) {
     const l = this.ladder!;
-    if (drop) { this.leaveLadder(l.n.clone().multiplyScalar(1.2), 0.5); this.events.push({ type: 'drop' }); return; }
+    void drop; // leave a ladder by climbing off either end or jumping off
     if (this.jumpBuffer > 0) {
       this.jumpBuffer = 0;
       // jump off backwards (steer sideways with the stick)
@@ -1041,7 +1170,11 @@ export class Player {
     const L = this.ledge!;
     this.swingT += dt;
     this.catchT += dt;
-    if (drop) {
+    // let go: hold the stick away from the wall for a moment (away + jump is still the wall push-off)
+    const awayNow = this.wishLen > 0.35 ? this.wish.dot(L.normal) : 0;
+    this.letGoT = awayNow > 0.7 && this.jumpBuffer <= 0 ? this.letGoT + dt : 0;
+    if (drop || this.letGoT >= PHYS.ledge.letGoTime) {
+      this.letGoT = 0;
       this.state = 'air';
       this.vel.copy(L.normal).multiplyScalar(1.2);
       this.vel.y = -1;

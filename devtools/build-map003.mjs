@@ -106,13 +106,14 @@ const ladders = [];
 function ladder(x, y0, z, h, r, nv = false) { const d = { p: [r2(x), r2(y0), r2(z)], h: r2(h), r }; if (nv) d.nv = true; ladders.push(d); return d; }
 const pads = [];
 const PADM = { file: 'assets/map003/bounce_pad', w: 1.54, d: 1.54, top: 0.35 };
-/** bounce pad (top surface at y) aimed at tg */
+/** bounce pad standing on the surface at y (its top is PADM.top * s higher), aimed at tg; returns its top centre */
 function pad(x, y, z, r, v, s, tg) {
-  B.kitPiece('solid', [x, r2(y - 0.02), z], [PADM.w * s, r2(PADM.top * s - 0.05), PADM.d * s], r, { vo: true });
-  const d = { t: 'jump', p: [r2(x), r2(y), r2(z)], r, v, s };
+  const top = r2(y + PADM.top * s);
+  B.kitPiece('solid', [x, top, z], [PADM.w * s, r2(PADM.top * s), PADM.d * s], r, { vo: true });
+  const d = { t: 'jump', p: [r2(x), top, r2(z)], r, v, s };
   if (tg) d.tg = tg.map(r2);
   pads.push(d);
-  return [r2(x), r2(y), r2(z)];
+  return [r2(x), top, r2(z)];
 }
 const movers = [];
 const TROLLEY = { deck: 0.12, hx: 0.62, z0: -0.35, z1: 0.33, railTop: 0.93 };
@@ -128,7 +129,7 @@ function trolley(id, a, b, open, o = {}) {
   const L = Math.hypot(b[0] - a[0], b[2] - a[2]), ext = TROLLEY.hx * s + 0.6;
   const railTop = r2(a[1] + (TROLLEY.railTop - TROLLEY.deck) * s);
   const cx = (a[0] + b[0]) / 2, cz = (a[2] + b[2]) / 2;
-  B.kitPiece('girder', [r2(cx), railTop, r2(cz)], [r2(0.1 * s), r2(0.25 * s), r2(L + 2 * ext)], alongX ? 90 : 0, { m: 'yellow', name: 'trolley rail' });
+  B.kitPiece('girder', [r2(cx), railTop, r2(cz)], [r2(0.1 * s), r2(0.25 * s), r2(L + 2 * ext)], alongX ? 90 : 0, { m: 'yellow', name: 'trolley rail', nc: true }); // visual: the car's own carriage is the solid part
   const ux = alongX ? Math.sign(b[0] - a[0]) : 0, uz = alongX ? 0 : Math.sign(b[2] - a[2]);
   for (const [px, pz] of [[a[0] - ux * ext, a[2] - uz * ext], [b[0] + ux * ext, b[2] + uz * ext]]) {
     const bot = B.surfaceBelow(px, pz, railTop - 0.4);
@@ -234,6 +235,7 @@ function boundary() {
 // =====================================================================================
 const BASE = deck('port deck', -83, -39.3, -33, 13, Y1, 'NSW', { m: 'metal' });
 B.kitPiece('rock', [-61, Y1 - 0.5, -10], [44, 46, 30], 0);
+B.prefab('container_tower_a', -72.0, Y1, 6.5, 180, 12, { name: 'container tower' });
 const GATE_IN = [-40.6, Y1, -9.2];
 B.mark('main', GATE_IN, 'Map 002 gate');
 // columns of the tower frame (corners + middle of the long sides), up to the summit
@@ -261,15 +263,19 @@ const bridge = { x: -51.0, z: -16.8, hx: 3.3, hz: 1.2, top: r2(k5.top + 0.67 * 3
 const c4 = crate(-56.0, -15.6, k6.top, 0);
 const k7 = stack(-56.2, -21.0, Y1, 7, 90);
 const p3 = pallet(-53.6, -21.0, k7.top, 0);
-const k8 = stack(-51.8, -14.4, Y1, 8, 0, { color: 'container_red' });
-const c5 = crate(-51.8, -12.6, k8.top, 0);
+const k8 = stack(-51.8, -12.6, Y1, 8, 0, { color: 'container_red' });
+const c5 = crate(-51.8, -11.6, k8.top, 0);
+// a short I-beam from the pallet on K7 over the bridge to K8 (post down beside the bridge)
+ibeam([-52.4, k8.top, -19.4], [-52.4, k8.top, r2(k8.z - k8.hz + 0.3)], 0.6);
+B.kitPiece('slab', [-52.4, r2(k8.top - 0.6), -19.1], [0.3, r2(k8.top - 0.6 - Y1), 0.3], 0, { m: 'yellow', nc: true });
 const k9 = stack(-57.6, -10.6, Y1, 9, 0, { color: 'container_yellow' });
 for (const [rec, lab] of [[c1, 'crate'], [k1, 'K1'], [c2, 'crate on K1'], [k2, 'K2'], [p1, 'pallet'], [k3, 'K3'], [c3, 'crate on K3'], [k4, 'K4'], [p2, 'pallet on K4'], [k5, 'K5']]) B.mark('main', P(rec), lab);
 B.mark('main', P(bridge, 2.4), 'bridge east');
 B.mark('main', P(bridge, -2.4), 'bridge west');
 B.mark('main', P(c4), 'crate on K6');
-B.mark('main', P(k7, 1.4), 'K7');
+B.mark('main', P(k7, -1.6), 'K7');
 B.mark('main', P(p3), 'pallet on K7');
+B.mark('main', [-52.4, k8.top, -17.6], 'beam to K8');
 B.mark('main', P(k8, 0, -1.4), 'K8');
 B.mark('main', P(c5), 'crate on K8');
 B.mark('main', P(k9, 0, 1.4), 'K9 (ledge up to deck 2)');
@@ -281,9 +287,10 @@ const D2 = deck('deck 2', HALF.W.x0, HALF.W.x1, Z0, Z1, Y2, 'NSW', { gaps: [['E'
 const D2in = [r2(HALF.W.x1 - 1.0), Y2, -10.6];
 B.mark('main', D2in, 'deck 2');
 // level 1: the wide, short beam on legs (on the deck)
-const lb = legBeam(-66.0, -10.6, Y2, 90, 2.6);
-B.mark('main', [-63.6, lb.top, -10.6], 'wide beam east');
-B.mark('main', [-68.4, lb.top, -10.6], 'wide beam west');
+const c20 = crate(-61.4, -15.0, Y2, 90); B.mark('main', P(c20), 'step crate'); void c20;
+const lb = legBeam(-66.0, -13.0, Y2, 0, 2.6);
+B.mark('main', [-63.6, lb.top, -13.0], 'wide beam east');
+B.mark('main', [-68.4, lb.top, -13.0], 'wide beam west');
 const k21 = stack(-72.6, -10.6, Y2, 1, 0);
 B.mark('main', P(k21), 'K21');
 // level 2: long narrow beam K22 -> K23 (0.55 wide, 11 m)
@@ -342,36 +349,39 @@ B.mark('main', L1.B, 'L1 car (top)', 'hover:L1:B');
 B.link([L1.A[0], Y3, r2(L1.car.z1 + 1.4)], L1.A, 'board'); B.link(L1.A, L1.B, 'lift');
 // T1: trolley south of the car top, open to the north, rides east
 const t1z = r2(L1.car.z1 + 1.2 - TROLLEY.z0 * 5);
-const T1 = trolley('T1', [L1.A[0], L1.B[1], t1z], [-49.6, L1.B[1], t1z], 'N');
+const T1 = trolley('T1', [L1.A[0], L1.B[1], t1z], [-47.6, L1.B[1], t1z], 'N');
 B.mark('main', [L1.A[0], L1.B[1], t1z], 'T1 (west)', 'hover:T1:A');
-B.mark('main', [-49.6, L1.B[1], t1z], 'T1 (east)', 'hover:T1:B');
-B.link(L1.B, [L1.A[0], L1.B[1], t1z], 'board'); B.link([L1.A[0], L1.B[1], t1z], [-49.6, L1.B[1], t1z], 'trolley');
+B.mark('main', [-47.6, L1.B[1], t1z], 'T1 (east)', 'hover:T1:B');
+B.link(L1.B, [L1.A[0], L1.B[1], t1z], 'board'); B.link([L1.A[0], L1.B[1], t1z], [-47.6, L1.B[1], t1z], 'trolley');
 // north of the trolley's east stop: a grate platform, then the stack climb in the north-east corner
-const P31 = plat(-49.6, r2(T1.B.z0 - 1.0 - 1.2), r2(L1.B[1] + 0.8), 3.0, 2.4, { posts: true });
+const P31 = plat(-47.6, r2(T1.B.z0 - 1.0 - 1.2), r2(L1.B[1] + 0.8), 3.0, 2.4, { posts: true });
+// a tall stack between the lift tower's roof and P31: the trolley is the only way across
+const k30 = stack(-51.0, -18.75, Y3, 8, 0, { color: 'container_red' }); void k30;
 B.mark('main', P(P31), 'P31');
-B.link([-49.6, L1.B[1], t1z], P(P31), 'alight');
-const k32 = stack(-45.0, -20.6, Y3, 6, 0); B.mark('main', P(k32, 0, 0.6), 'K32');
-const pl32 = pallet(-45.0, -18.9, k32.top, 0, 1.3); B.mark('main', P(pl32), 'pallet on K32');
-const k33 = stack(-45.0, -12.2, Y3, 7, 0, { color: 'container_yellow' }); B.mark('main', P(k33, 0, -1.4), 'K33');
+B.link([-47.6, L1.B[1], t1z], P(P31), 'alight');
+const k32 = stack(-44.6, -20.6, Y3, 6, 0); B.mark('main', P(k32, 0, -1.8), 'K32');
+const pl32 = pallet(-44.6, -18.9, k32.top, 0, 1.3); B.mark('main', P(pl32), 'pallet on K32');
+// P32: a grate platform hanging above the trolley lane (no posts: T1 runs underneath)
+const k33 = plat(-45.0, -13.6, r2(pl32.top + 1.31), 3.0, 3.0, { posts: false }); B.mark('main', P(k33), 'P32');
 // I-beam south along the east edge to a grate platform
 const P33 = plat(-45.0, -3.0, k33.top, 3.0, 3.0);
-ibeam([-45.0, k33.top, k33.z + k33.hz - 0.2], [-45.0, k33.top, -4.4], 0.6);
+ibeam([-45.0, k33.top, r2(k33.z + k33.hz - 0.1)], [-45.0, k33.top, -4.4], 0.6);
 B.mark('main', [-45.0, k33.top, -8.0], 'I-beam');
 B.mark('main', P(P33), 'P33');
 // T2: trolley along the south edge, open to the north, rides west; L2's car waits north of its west stop
 const t2z = r2(P33.z + P33.hz + 1.0 - TROLLEY.z0 * 5);
-const T2 = trolley('T2', [-47.0, k33.top, t2z], [-55.0, k33.top, t2z], 'N', { wait: 2.6 });
+const T2 = trolley('T2', [-47.0, k33.top, t2z], [-56.0, k33.top, t2z], 'N', { wait: 2.6 });
 B.mark('main', [-47.0, k33.top, t2z], 'T2 (east)', 'hover:T2:A');
-B.mark('main', [-55.0, k33.top, t2z], 'T2 (west)', 'hover:T2:B');
-B.link(P(P33), [-47.0, k33.top, t2z], 'board'); B.link([-47.0, k33.top, t2z], [-55.0, k33.top, t2z], 'trolley');
+B.mark('main', [-56.0, k33.top, t2z], 'T2 (west)', 'hover:T2:B');
+B.link(P(P33), [-47.0, k33.top, t2z], 'board'); B.link([-47.0, k33.top, t2z], [-56.0, k33.top, t2z], 'trolley');
 // L2: lift tower on a scaffold, car facing south (towards T2)
 const l2s = 12, l2base = r2(k33.top - LIFT.lo * l2s);
 const l2cz = r2(T2.B.z0 - 1.0 - LIFT.hz * l2s), l2bz = r2(l2cz - LIFT.cz * l2s);
-const PL2 = plat(-54.94, l2bz, l2base, 6.0, 6.6);
-const L2 = liftTower('L2', [-54.94, l2base, l2bz], 0, l2s);
+const PL2 = plat(-55.94, l2bz, l2base, 6.0, 6.6);
+const L2 = liftTower('L2', [-55.94, l2base, l2bz], 0, l2s);
 B.mark('main', L2.A, 'L2 car (bottom)', 'hover:L2:A');
 B.mark('main', L2.B, 'L2 car (top)', 'hover:L2:B');
-B.link([-55.0, k33.top, t2z], L2.A, 'board'); B.link(L2.A, L2.B, 'lift');
+B.link([-56.0, k33.top, t2z], L2.A, 'board'); B.link(L2.A, L2.B, 'lift');
 // over the lift tower's roof and across the divider to deck 4
 const X34z = r2(l2bz - 1.4);
 B.mark('main', [-57.3, L2.top, X34z], 'L2 roof');
@@ -394,7 +404,7 @@ if (STAGE === 'all') {
   const c43 = crate(-67.9, -21.2, k43.top, 0); B.mark('main', P(c43), 'crate on K43');
   // S1: swings north <-> south on the west side
   const s1y = r2(c43.top - 0.24);
-  const S1 = swing('S1', [-72.6, r2(s1y + 9 * Math.cos((26 * Math.PI) / 180)), -13.4], 9, 26, 6.2, 0, { s: 6.5, armS: 7 });
+  const S1 = swing('S1', [-72.6, r2(s1y + 9 * Math.cos((26 * Math.PI) / 180)), -13.4], 9, 26, 6.2, 0, { s: 6.5, armS: 6.2 });
   const PA = plat(-72.6, r2(S1.fa.z0 - 1.05 - 1.2), s1y, 3.0, 2.4);
   const PB = plat(-72.6, r2(S1.fb.z1 + 1.05 + 1.2), s1y, 3.0, 2.4);
   B.mark('main', P(PA), 'PA (swing 1)');
@@ -406,34 +416,30 @@ if (STAGE === 'all') {
   const k44 = stack(-75.6, -0.8, Y4, 3, 0, { color: 'container_red' }); B.mark('main', P(k44, 0, -1.4), 'K44');
   const pl44 = pallet(-75.6, 0.6, k44.top, 0, 1.3); B.mark('main', P(pl44), 'pallet on K44');
   const r1y = r2(pl44.top + 1.07);
-  const R1 = rotor('R1', [-64.57, r1y, 0.22], 4.5, -90, -175);
+  const R1 = rotor('R1', [-64.57, r1y, 0.22], 4.5, -90, -150);
   B.mark('main', R1.A, 'R1 (west)', 'rotor:R1:A');
   B.mark('main', R1.B, 'R1 (north)', 'rotor:R1:B');
   B.link(P(pl44), R1.A, 'board'); B.link(R1.A, R1.B, 'rotor');
-  const k45 = stack(-67.2, -11.6, Y4, 4, 90, { color: 'container_green' }); B.mark('main', P(k45, 0.6), 'K45');
+  const k45 = stack(-67.2, -10.4, Y4, 4, 90, { color: 'container_green' }); B.mark('main', P(k45, 0.6), 'K45');
   B.link(R1.B, P(k45, 0.6), 'alight');
-  const k46 = stack(-67.2, -17.0, Y4, 5, 90); B.mark('main', P(k46, -0.6), 'K46');
-  // S2: swings east <-> west along the north edge, boarded from K46's north side
-  const s2y = k46.top;
-  const S2 = swing('S2', [-70.6, r2(s2y + 8 * Math.cos((28 * Math.PI) / 180)), -20.5], 8, 28, 6.0, -90, { s: 6.0, armS: 5.2, phase: 1.1 });
-  B.mark('main', [S2.A[0], s2y, r2(k46.z - k46.hz + 0.6)], 'K46 north edge');
-  B.mark('main', S2.A, 'S2 (east)', 'swing:S2:A');
-  B.mark('main', S2.B, 'S2 (west)', 'swing:S2:B');
-  B.link([S2.A[0], s2y, r2(k46.z - k46.hz + 0.6)], S2.A, 'board'); B.link(S2.A, S2.B, 'swing');
-  const PC = plat(S2.B[0], r2(S2.fb.z1 + 1.0 + 1.2), s2y, 3.0, 2.4, { posts: true });
-  B.mark('main', P(PC), 'PC');
-  B.link(S2.B, P(PC), 'alight');
-  // the climb back east and over the divider at 430
-  const k47 = stack(-75.2, -7.6, Y4, 7, 0, { color: 'container_yellow' }); B.mark('main', P(k47, 0, -1.6), 'K47');
-  const pl47 = pallet(-75.2, -5.4, k47.top, 0, 1.3); B.mark('main', P(pl47), 'pallet on K47');
-  const b4y = r2(Y5 - 1.6);
-  const P41 = plat(-71.0, -2.2, b4y, 2.6, 2.6, { posts: false });
-  B.mark('main', P(P41), 'P41');
-  ibeam([-69.7, b4y, -2.2], [-62.6, b4y, -2.2], 0.5);
-  B.mark('main', [-66.0, b4y, -2.2], 'beam to the divider');
-  const P42 = plat(-61.6, -2.2, b4y, 2.0, 2.6, { posts: false });
-  B.mark('main', P(P42), 'P42');
-  const X45z = -2.2;
+  const k46 = stack(-67.2, -15.7, Y4, 5, 90); B.mark('main', P(k46, 0.8), 'K46');
+  // L3: lift tower on a steel deck over the north-east corner, boarded from K46
+  const l3s = 13, l3base = r2(k46.top + 0.4 - LIFT.lo * l3s);
+  const PL3 = plat(-63.6, -20.5, l3base, 6.4, 7.0);
+  const L3 = liftTower('L3', [-63.6, l3base, -20.5], 0, l3s, { wait: 2.6 });
+  B.mark('main', [-65.2, k46.top, r2(k46.z - k46.hz + 0.5)], 'K46 north edge');
+  B.mark('main', L3.A, 'L3 car (bottom)', 'hover:L3:A');
+  B.mark('main', L3.B, 'L3 car (top)', 'hover:L3:B');
+  B.link([-65.2, k46.top, r2(k46.z - k46.hz + 0.5)], L3.A, 'board'); B.link(L3.A, L3.B, 'lift');
+  // two grate steps south, then over the divider to deck 5
+  const P44 = plat(-62.6, r2(L3.car.z1 + 1.35 + 1.3), r2(L3.B[1] + 1.5), 2.6, 2.6);
+  B.mark('main', P(P44), 'P44');
+  B.link(L3.B, P(P44), 'alight');
+  const X45z = -10.4;
+  const P45 = plat(-62.6, X45z, r2(P44.top + 2.4), 2.6, 2.6);
+  B.mark('main', P(P45), 'P45');
+  B.mark('main', [-61.6, P45.top, X45z], 'P45 east edge');
+  void PL3;
   divider(Y4, Y5 - 0.5, [[-8.2, -3.6, Y4 - 1, Y4 + 3]]);
   void D4;
   console.log('zone 4 placed');
@@ -457,25 +463,26 @@ if (STAGE === 'all') {
   B.link([-45.4, k51.top, r2(k52.z - k52.hz - 0.5)], P(k52), 'ladder');
   B.mark('main', P(k52, 0, 0.6), 'K52');
   // (2) pad to a small floating platform
-  const F51 = plat(-52.6, -9.0, r2(k52.top + 5.4), 2.4, 2.4, { posts: false });
-  const J52 = pad(-45.4, k52.top, -8.6, -90, 20, 1.2, P(F51, 0.8));
+  const F51 = plat(-52.6, -9.0, r2(k52.top + 5.4), 3.0, 3.4, { posts: false });
+  const J52 = pad(-45.4, k52.top, -8.2, -90, 22, 1.2, P(F51, 0, 0.8));
   B.mark('main', J52, 'pad J52', 'topad');
-  B.mark('main', P(F51, 0.8), 'F51 (floating)', 'pad');
-  B.link(J52, P(F51, 0.8), 'pad');
+  B.mark('main', P(F51, 0, 0.8), 'F51 (floating)', 'pad');
+  B.link(J52, P(F51, 0, 0.8), 'pad');
   // (3) two pads in a row, two directions: north, then west
   const F52 = plat(-52.6, -16.6, r2(F51.top + 2.2), 2.4, 2.4, { posts: false });
-  const J54 = pad(-52.6, F52.top, -16.6, -90, 20, 1.2, [-57.8, r2(Y6 - 2.0), -16.6]);
-  const J53 = pad(-52.6, F51.top, -9.6, 180, 19, 1.2, J54);
+  const J54 = pad(-52.6, F52.top, -16.6, -90, 21, 1.2, [-57.2, r2(Y6 - 2.0), -16.6]);
+  const J53 = pad(-52.6, F51.top, -9.9, 180, 20, 1.2, J54);
   B.mark('main', J53, 'pad J53', 'topad');
   B.mark('main', J54, 'pad J54 (chain)', 'pad');
   B.link(J53, J54, 'pad');
-  const P53 = plat(-57.6, -16.6, r2(Y6 - 2.0), 3.2, 3.0, { posts: false });
+  const P53 = plat(-57.2, -16.6, r2(Y6 - 2.0), 3.2, 3.0, { posts: false });
   B.mark('main', P(P53), 'P53', 'pad');
   B.link(J54, P(P53), 'pad');
   // stairs up to the divider top and deck 6
   B.kitPiece('stairs', [-59.2, Y6, -16.6], [2.4, 2.0, 1.4, 5], -90, { m: 'metal' });
   B.mark('main', [-59.0, Y6 - 0.5, -16.6], 'stairs');
-  divider(Y5, Y6 - 0.5, [[-4.5, 0.1, Y5 - 1, Y5 + 3]]);
+  B.prefab('slewing_crane', -53.5, Y5, 0.5, 180, 7, { name: 'slewing crane' });
+  divider(Y5, Y6 - 0.5, [[X45z - 2, X45z + 2, Y5 - 1, Y5 + 3]]);
   void D5;
   console.log('zone 5 placed');
 
@@ -524,26 +531,28 @@ if (STAGE === 'all') {
   B.link(P(PD), S62.A, 'board'); B.link(S62.A, S62.B, 'swing'); B.link(S62.B, S61.A, 'board'); B.link(S61.A, S61.B, 'swing'); B.link(S61.B, P(PE, 0.6), 'alight');
   // band 3: a ladder up a steel column to a perch, a crane jib turning over the whole half, then a last column
   const p61y = r2(sy + 10.9);
-  column(-72.4, -20.8, Y6, r2(p61y - 0.3), 1.6);
-  ladder(-71.6, sy, -20.8, r2(p61y - sy), 90);
-  B.mark('main', [-71.1, sy, -20.8], 'ladder foot (column)', 'ladder');
-  const P61 = plat(-72.4, -20.8, p61y, 2.4, 2.4, { posts: false });
-  B.link([-71.1, sy, -20.8], P(P61), 'ladder');
+  // a steel column standing on K61, ladder on its west face straight up from PE
+  column(-66.7, -20.76, k61.top, r2(p61y - 0.3), 1.6);
+  ladder(-67.5, sy, -20.76, r2(p61y - sy), -90);
+  B.mark('main', [-67.9, sy, -20.76], 'ladder foot (column)', 'ladder');
+  const P61 = plat(-66.7, -20.76, p61y, 2.4, 2.4, { posts: false });
+  B.link([-67.9, sy, -20.76], P(P61), 'ladder');
   B.mark('main', P(P61), 'P61');
-  const R2 = rotor('R2', [-68.32, r2(p61y + 1.0), -11.28], 4, 200, 380, { speed: 28 });
+  // R2: a jib on a mast east of the twin swings, turning from north to south through the west, above everything
+  const R2 = rotor('R2', [-64.0, r2(p61y + 1.0), -11.0], 4, 200, 360, { speed: 28 });
   B.mark('main', R2.A, 'R2 (north)', 'rotor:R2:A');
-  B.mark('main', R2.B, 'R2 (south-east)', 'rotor:R2:B');
+  B.mark('main', R2.B, 'R2 (south)', 'rotor:R2:B');
   B.link(P(P61), R2.A, 'board'); B.link(R2.A, R2.B, 'rotor');
-  const P62 = plat(-65.1, -1.74, p61y, 2.6, 2.6);
+  const P62 = plat(-63.5, -1.1, p61y, 2.8, 2.6);
   B.mark('main', P(P62), 'P62');
   B.link(R2.B, P(P62), 'alight');
   const cl7y = r2(Y7 - 1.2);
-  column(-62.2, -1.8, Y6, cl7y, 1.6);
-  ladder(-63.0, p61y, -1.8, r2(cl7y - p61y), -90);
-  B.mark('main', [-63.5, p61y, -1.8], 'ladder foot (last column)', 'ladder');
-  B.link([-63.5, p61y, -1.8], [-62.2, cl7y, -1.8], 'ladder');
-  B.mark('main', [-62.2, cl7y, -1.8], 'column top');
-  const X67z = -1.8;
+  column(-61.3, -1.1, Y6, cl7y, 1.6);
+  ladder(-62.1, p61y, -1.1, r2(cl7y - p61y), -90);
+  B.mark('main', [-62.5, p61y, -1.1], 'ladder foot (last column)', 'ladder');
+  B.link([-62.5, p61y, -1.1], [-61.3, cl7y, -1.1], 'ladder');
+  B.mark('main', [-61.3, cl7y, -1.1], 'column top');
+  const X67z = -1.1;
   divider(Y6, Y7 - 0.5, [[-19.0, -14.2, Y6 - 1, Y6 + 3]]);
   void D6;
   console.log('zone 6 placed');
@@ -558,24 +567,23 @@ if (STAGE === 'all') {
   const k71 = stack(-55.6, -1.0, Y7, 1, 90, { color: 'container_red' }); B.mark('main', P(k71), 'K71');
   const k72 = stack(-49.8, -1.0, Y7, 2, 90, { color: 'container_yellow' }); B.mark('main', P(k72), 'K72');
   const k73 = stack(-45.2, -6.2, Y7, 3, 0, { color: 'container_green' }); B.mark('main', P(k73), 'K73');
-  const k74 = stack(-45.2, -12.4, Y7, 4, 0); B.mark('main', P(k74), 'K74');
+  const k74 = stack(-45.2, -12.4, Y7, 4, 0); B.mark('main', P(k74, 0, 1.6), 'K74');
   const pl74 = pallet(-45.2, -14.0, k74.top, 0, 1.3); B.mark('main', P(pl74), 'pallet on K74');
-  const k75 = stack(-45.2, -20.4, Y7, 6, 0, { color: 'container_red' }); B.mark('main', P(k75, 0, -1.0), 'K75');
-  const k76 = stack(-53.2, -20.4, Y7, 6, 90, { color: 'container_yellow' });
+  const k75 = stack(-45.2, -20.4, Y7, 5, 0, { color: 'container_red' }); B.mark('main', P(k75, 0, 1.0), 'K75');
+  const k76 = stack(-53.2, -20.4, Y7, 5, 90, { color: 'container_yellow' });
   B.prefab('steel_catwalk', -48.6, k75.top, -20.4, 0, 2.8, { name: 'catwalk' });
   B.mark('main', [-48.6, r2(k75.top + 0.67 * 2.8), -20.4], 'catwalk');
-  B.mark('main', P(k76, 1.6), 'K76');
+  B.mark('main', P(k76, 0.4), 'K76');
   const c76 = crate(-54.6, -20.4, k76.top, 90); B.mark('main', P(c76), 'crate on K76');
-  const k77 = stack(-56.2, -13.6, Y7, 8, 0, { color: 'container_green' }); B.mark('main', P(k77, 0, -1.2), 'K77');
+  const k77 = stack(-56.2, -13.6, Y7, 7, 0, { color: 'container_green' }); B.mark('main', P(k77, 0, -1.2), 'K77');
   const pl77 = pallet(-56.2, -12.0, k77.top, 0, 1.3); B.mark('main', P(pl77), 'pallet on K77');
-  const k78 = stack(-50.6, -11.0, Y7, 9, 90); B.mark('main', P(k78, -1.6), 'K78');
-  // summit: a last narrow beam out to the gate platform
-  const TOPP = plat(-51.4, -4.6, TOP, 6.0, 4.6, { posts: false });
-  ibeam([-50.6, r2(k78.top), -9.6], [-50.6, r2(k78.top), -7.0], 0.5);
-  B.mark('main', [-50.6, k78.top, -8.0], 'last beam');
+  const k78 = stack(-50.6, -11.0, Y7, 8, 90); B.mark('main', P(k78, -1.6), 'K78');
+  // summit: a crate on the last stack, then up onto the gate platform
+  const c78 = crate(-50.6, -10.6, k78.top, 0); B.mark('main', P(c78), 'crate on K78');
+  const TOPP = plat(-51.4, -4.6, TOP, 6.0, 4.6);
   B.mark('main', P(TOPP, 0, 0.6), 'SUMMIT');
-  // landmark: a slewing crane on the deck
-  B.prefab('slewing_crane', -53.0, Y7, 1.6, 180, 7.5, { name: 'slewing crane' });
+  // landmarks you can climb on: a container block tower in the corner
+  B.prefab('container_tower_b', -47.0, Y7, 2.2, 0, 10, { name: 'container tower' });
   void D7;
   EXIT = P(TOPP, 0, 0.6);
   console.log('zone 7 placed', JSON.stringify({ k78: k78.top, TOP }));
@@ -622,9 +630,19 @@ function sweepCheck() {
       }
     }
   }
+  if (process.env.DBG) {
+    const [x, y, z] = JSON.parse(process.env.DBG);
+    for (const o of B.objects) for (const b of objBoxes(o)) if (x > b.x0 - 0.4 && x < b.x1 + 0.4 && z > b.z0 - 0.4 && z < b.z1 + 0.4 && b.y1 > y - 0.5 && b.y0 < y + 2.0) console.log('  DBG near', o.name, JSON.stringify(b));
+  }
   console.log(`  mover clearance: ${hits.length ? hits.length + ' hits\n    ' + [...new Set(hits)].slice(0, 30).join('\n    ') : 'ok'}`);
 }
 sweepCheck();
+if (process.env.NOLINK) {
+  const mv = movers.find((m) => m.id === process.env.NOLINK);
+  const same = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 0.05;
+  B.links = (B.links ?? []).filter((l) => !mv.pts.some((q) => same(l.a, q) || same(l.b, q)));
+  B.extraNodes = (B.extraNodes ?? []).filter((n) => !mv.pts.some((q) => same([n.x, n.y, n.z], q)));
+}
 if (process.env.NOMOVERS) B.links = (B.links ?? []).filter((l) => l.kind === 'ladder');
 
 
@@ -632,6 +650,7 @@ if (process.env.NOMOVERS) B.links = (B.links ?? []).filter((l) => l.kind === 'la
 // VALIDATION, OUTPUT
 // =====================================================================================
 const val = B.validate(GATE_IN, EXIT);
+if (process.env.NOLINK && val.hard.path) { const names = []; for (const i of val.hard.path) { const n = val.nodes[i]; const k = `${n.o?.name ?? 'ground'}@${n.y.toFixed(0)}`; if (names[names.length - 1] !== k) names.push(k); } console.log('  bypass:', names.join(' > ')); }
 B.checkOverlaps();
 await plotMap(B, val, new URL('./out/map003_plan.png', import.meta.url).pathname, { cx: C3.x, cz: C3.z, r: 30, y0: Y1 - 5, y1: TOP + 5 });
 console.log('route points', JSON.stringify(Object.fromEntries(Object.entries(B.routes).map(([k, v]) => [k, v.length]))));
@@ -648,7 +667,7 @@ const zones = [
 const data = B.toJSON({
   id: 'map003', name: 'Container Port', version: 1, height: TOP - Y1, origin: [0, Y1, 0],
   spawn: { p: GATE_IN, yaw: -Math.PI / 2 },
-  exit: { p: EXIT, r: 2.6, next: 'map004', label: 'Map 004', gate: { p: [-60, TOP, -19.6], yaw: 0, w: 4.4, h: 4.2 } },
+  exit: { p: EXIT, r: 2.6, next: 'map004', label: 'Map 004', gate: { p: [-51.4, TOP, -2.8], yaw: 0, w: 4.4, h: 4.2 } },
   finishHint: 'Gợi ý: hai container treo luôn gặp nhau ở cùng một nhịp – đếm nhịp rồi hãy nhảy.',
   challengeTime: 1500,
   zones, milestones: [340, 360, 380, 400, 420, 440, 460, 480, 500, 520],
@@ -656,9 +675,24 @@ const data = B.toJSON({
   terrain: { style: 'none', radius: RING, center: [C3.x, 340, C3.z], wallTop: TOP + 40 - 340, plazas: [], paths: [] },
   movers, pads, rings: [], ladders,
   padModel: PADM,
-  prefabFiles: Object.fromEntries(['shipping_container', 'container_red', 'container_yellow', 'container_green', 'steel_crate', 'cargo_pallet_stand', 'steel_ibeam', 'balance_beam', 'steel_catwalk', 'gantry_arm', 'hanging_container', 'tower_crane', 'banner_crane_arm', 'suspended_platform', 'container_tower_a', 'container_tower_b', 'bounce_pad'].map((id) => [id, `assets/map003/${id}`])),
+  prefabFiles: Object.fromEntries([...new Set(B.prefabs.map((p) => p.id))].map((id) => [id, `assets/map003/${id}`])),
   waypoints: makeWaypoints(B.routes, zones),
 });
 fs.writeFileSync(new URL('../packs/map003/maps/map003.json', import.meta.url), JSON.stringify(data));
 fs.writeFileSync(new URL('./out/routes003.json', import.meta.url), JSON.stringify(B.routes));
+// pack.json: ship only what the map uses (the folder may hold spare imports)
+{
+  const { referencedFiles } = await import('./content.mjs');
+  const dir = new URL('../packs/map003/', import.meta.url).pathname;
+  const include = ['maps/map003.json', ...[...referencedFiles(data)].filter((f) => fs.existsSync(dir + f))].sort();
+  const pf = dir + 'pack.json';
+  const old = fs.existsSync(pf) ? JSON.parse(fs.readFileSync(pf, 'utf8')) : {};
+  const meta = {
+    id: 'map003', name: 'Container Port', order: 3, yMin: 318, yMax: TOP + 40, entry: 'maps/map003.json', minApp: 2, requires: [],
+    summary: 'Cảng container trên mây · 320 → 520 m · 7 khu · thang nâng, xe treo, container đu đưa, cần cẩu xoay, bệ bật',
+    include, ...(old.version ? { version: old.version, contentHash: old.contentHash } : {}),
+  };
+  fs.writeFileSync(pf, JSON.stringify(meta, null, 1) + '\n');
+  console.log(`pack.json: ${include.length} files`);
+}
 console.log(`prefabs ${B.prefabs.length}, kit ${B.kit.length}, movers ${movers.length}, pads ${pads.length}, ladders ${ladders.length}`);

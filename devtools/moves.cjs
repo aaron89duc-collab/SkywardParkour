@@ -1,4 +1,4 @@
-// Deterministic tests for the advanced moves (ledge catch, shimmy, push-off, lower, roll, mantle, vault).
+// Deterministic tests for the advanced moves (ledge catch, shimmy, push-off, let go, roll, mantle, vault).
 const OUT = require('path').join(__dirname, 'out', 'shots'); require('fs').mkdirSync(OUT, { recursive: true });
 const { chromium } = require('playwright');
 (async () => {
@@ -9,7 +9,9 @@ const { chromium } = require('playwright');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 180000 });
   await page.evaluate(() => { const g = window.__game; g.renderer.setAnimationLoop(null); g.state = 'playing'; g.input.enabled = true; });
   const shots = [];
+  const only = process.argv[2] && process.argv[2] !== 'islands' ? process.argv[2] : null; // run a single test (fresh page)
   const run = async (name, setup) => {
+    if (only && name !== only) return;
     const r = await page.evaluate(({ name, setup }) => {
       const g = window.__game, P = g.player, I = g.input, V = P.pos.constructor;
       const dt = 1 / 60;
@@ -19,6 +21,8 @@ const { chromium } = require('playwright');
       P.teleport(new V(...S.p), S.yaw ?? 0);
       if (S.vel) P.vel.set(...S.vel);
       P.regrab = 0;
+      // every test starts from a clean airborne state (no carry-over from the previous test)
+      P.state = 'air'; P.grounded = false; P.ledge = null; P.move = null; P.slipT = 0; P.reflexT = 0; P.coyote = 0;
       if (S.prep) S.prep(g, P, I, V);
       let camYaw = S.camYaw ?? 0;
       let last = '';
@@ -45,7 +49,7 @@ const { chromium } = require('playwright');
     const shot = await page.evaluate(() => { const s = window.__shot; window.__shot = null; return s; });
     if (shot) { require('fs').writeFileSync(`${OUT}/move_${name}.jpg`, Buffer.from(shot.split(',')[1], 'base64')); }
   };
-  if (process.argv[2] !== 'islands') {
+  if (process.argv[2] !== 'islands' || only) {
   // podium at (-9,140,-37), 6.4 wide: west face x=-12.2
   // falling past an edge: caught only with intent (stick toward the wall), never by itself
   await run('catch', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, t: 1.2, camYaw: -Math.PI/2, input: (t, I) => { I.touchMoveY = t < 0.5 ? 1 : 0; }, shotAt: 1.1 }`);
@@ -54,7 +58,9 @@ const { chromium } = require('playwright');
   await run('shimmy', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, vel: [0.8, 0, 0], t: 3.2, camYaw: Math.PI/2, input: (t, I) => { I.touchMoveY = t > 0.26 && t < 0.5 ? -1 : 0; I.touchMoveX = t > 0.8 ? 1 : 0; }, shotAt: 1.6 }`);
   await run('pushoff', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, vel: [0.8, 0, 0], t: 2.0, camYaw: Math.PI/2, input: (t, I) => { if (t > 0.8) { I.touchMoveY = 1; } if (Math.abs(t - 0.9) < 0.01) { I.pressJump(); I.touchJumpHeld = true; } }, shotAt: 1.2 }`);
   await run('climb', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, vel: [0.8, 0, 0], t: 2.2, input: (t, I) => { if (Math.abs(t - 0.8) < 0.01) I.pressJump(); }, shotAt: 1.15 }`);
-  await run('lower_button', `{ p: [-11.75, 140.05, -38], yaw: -Math.PI/2, t: 1.6, input: (t, I) => { if (Math.abs(t - 0.3) < 0.01) I.pressDrop(); }, shotAt: 0.75 }`);
+  // no drop button: letting go = holding the stick away from the wall (0.45 s); a quick pull + jump is still the push-off
+  await run('let_go_quick_tap', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, vel: [0.8, 0, 0], t: 2.0, input: (t, I) => { I.touchMoveX = t > 0.8 && t < 1.0 ? -1 : 0; } }`);
+  await run('let_go', `{ p: [-12.75, 141.2, -38], yaw: -Math.PI/2, vel: [0.8, 0, 0], t: 2.0, input: (t, I) => { I.touchMoveX = t > 0.8 ? -1 : 0; }, shotAt: 1.4 }`);
   // a misstep is a fall (tips over the edge first); pulling back in time saves it
   await run('walkoff_slow', `{ p: [-10.8, 140.05, -38], yaw: -Math.PI/2, t: 2.0, camYaw: Math.PI/2, input: (t, I) => { I.touchMoveY = 0.4; } }`);
   await run('walkoff_reflex', `{ p: [-10.8, 140.05, -38], yaw: -Math.PI/2, t: 2.4, camYaw: Math.PI/2, input: function (t, I, P) { if (t > 0.1 && P.state === 'air' && this.off == null) this.off = t; I.touchMoveY = this.off == null ? 0.4 : t - this.off < 0.25 ? 0.4 : t - this.off < 0.6 ? -1 : 0; } }`);

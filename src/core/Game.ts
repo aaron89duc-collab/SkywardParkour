@@ -160,6 +160,8 @@ export class Game {
 
     this.player = new Player(this.physics, this.scene);
     this.player.hooks = this.maps;
+    this.maps.playerFeet = () => ({ y: this.player.feetY, rising: this.player.vel.y > 0.5 });
+    this.maps.collected = this.save.collected ?? [];
     this.player.spawnPoint.set(...this.map.spawn.p);
     this.player.spawnYaw = this.map.spawn.yaw;
     this.ui.setLoading(0.9, 'Đang gọi nhân vật…');
@@ -880,8 +882,8 @@ export class Game {
           this.save.slipTips = (this.save.slipTips ?? 0) + 1;
           writeSave(this.save);
           const msg = this.isTouch
-            ? 'Vừa hụt chân thì kéo cần ngược lại ngay để bám lại mép · Muốn trèo xuống: đứng sát mép bấm THẢ'
-            : 'Vừa hụt chân thì bấm phím ngược hướng ngay để bám lại mép · Muốn trèo xuống: đứng sát mép bấm E';
+            ? 'Vừa hụt chân thì kéo cần ngược lại ngay để bám lại mép'
+            : 'Vừa hụt chân thì bấm phím ngược hướng ngay để bám lại mép';
           setTimeout(() => this.ui.toast('Lỡ bước khỏi mép?', msg, false, 4600), 700);
         }
         this.slipAt = -99;
@@ -930,6 +932,39 @@ export class Game {
         this.fx.sparkles.emit(feet.clone().add(new THREE.Vector3(0, 0.3, 0)), 18, { speed: 2.5, up: 6, life: 0.9, size: 0.35 });
         this.haptic(25);
         break;
+      case 'bounce':
+        this.audio.boing();
+        this.fx.dust.emit(feet, 8, { speed: 2.2, up: 1.5, life: 0.5, size: 0.4 });
+        this.haptic(15);
+        break;
+      case 'knock':
+        this.audio.clank();
+        this.haptic(30);
+        break;
+      case 'portal':
+        this.audio.whoosh();
+        this.fx.sparkles.emit(this.player.pos.clone(), 24, { speed: 3, up: 1, life: 0.7, size: 0.35 });
+        break;
+      case 'zip':
+        this.audio.whoosh();
+        break;
+      case 'checkpoint':
+        // the respawn point moves here (Adventure); Challenge runs always restart from the bottom
+        if (this.mode !== 'challenge') { this.player.spawnPoint.copy(e.p); this.player.spawnYaw = e.yaw; }
+        this.audio.chime();
+        this.ui.toast('Điểm hồi sinh', 'Rơi khỏi bản đồ sẽ quay lại đây', true, 2400);
+        break;
+      case 'collect': {
+        const key = `${this.map?.id ?? 'map'}:${e.id}`;
+        const list = (this.save.collected ??= []);
+        if (!list.includes(key)) { list.push(key); writeSave(this.save); }
+        this.maps.collected = list;
+        this.audio.chime();
+        this.fx.sparkles.emit(this.player.pos.clone().add(new THREE.Vector3(0, 0.6, 0)), 26, { speed: 3.5, up: 2, life: 0.8, size: 0.35 });
+        const n = list.filter((k) => k.startsWith(`${this.map?.id ?? 'map'}:`)).length;
+        this.ui.toast('Nhặt được ngọc', `${n} viên ở ${this.map?.name ?? 'map này'}`, true, 2000);
+        break;
+      }
       case 'ring':
         this.audio.whoosh();
         this.fx.sparkles.emit(this.player.pos.clone(), 18, { speed: 4, up: 1, life: 0.8, size: 0.4 });
@@ -939,7 +974,7 @@ export class Game {
         this.audio.clank();
         if (!this.ladderTipShown) {
           this.ladderTipShown = true;
-          this.ui.toast('Đang bám thang', this.isTouch ? 'Đẩy cần lên/xuống: leo · NHẢY: bật ra · THẢ: buông' : 'W/S: leo lên/xuống · Space: bật ra · E: buông', false, 3800);
+          this.ui.toast('Đang bám thang', this.isTouch ? 'Đẩy cần lên/xuống: leo · NHẢY: bật ra' : 'W/S: leo lên/xuống · Space: bật ra', false, 3800);
         }
         break;
     }
@@ -954,8 +989,8 @@ export class Game {
     this.save.tips = n + 1;
     writeSave(this.save);
     const msg = this.isTouch
-      ? 'NHẢY: leo lên · Cần trái/phải: đi dọc mép · Kéo lùi + NHẢY: bật tường · THẢ: buông'
-      : 'Space: leo lên · A/D: đi dọc mép · S + Space: bật tường · E: buông';
+      ? 'NHẢY: leo lên · Cần trái/phải: đi dọc mép · Kéo lùi + NHẢY: bật tường · Giữ kéo lùi: buông'
+      : 'Space: leo lên · A/D: đi dọc mép · S + Space: bật tường · Giữ S: buông';
     this.ui.toast('Đang bám mép', msg, false, 4200);
   }
 }
