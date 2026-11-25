@@ -3,7 +3,10 @@ type FsDoc = Document & { webkitFullscreenElement?: Element; webkitExitFullscree
 type FsEl = HTMLElement & { webkitRequestFullscreen?: (opts?: unknown) => Promise<void> };
 
 export const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+/** inside the Android app (Capacitor): already full screen and landscape, natively */
+export const isNativeApp = () => !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
 export const isStandalone = () =>
+  isNativeApp() ||
   window.matchMedia?.('(display-mode: fullscreen)').matches ||
   window.matchMedia?.('(display-mode: standalone)').matches ||
   (navigator as unknown as { standalone?: boolean }).standalone === true;

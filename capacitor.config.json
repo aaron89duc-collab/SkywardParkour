@@ -1,0 +1,13 @@
+{
+  "appId": "com.skywardparkour.game",
+  "appName": "Skyward Parkour",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#3c84d6",
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

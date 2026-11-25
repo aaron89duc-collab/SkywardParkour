@@ -600,6 +600,13 @@ export class Game {
     this.input.clearEdges();
   }
 
+  /** Android back button: pause while climbing, resume when paused; false = nothing to do (leave the app) */
+  onBackButton(): boolean {
+    if (this.state === 'playing') { this.pause(); return true; }
+    if (this.state === 'paused') { this.resume(); return true; }
+    return false;
+  }
+
   pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
