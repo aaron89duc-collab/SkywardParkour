@@ -98,6 +98,8 @@ piece. Rotation rules keep maps fresh:
   the next map's height band (`devtools/out/freefall.cjs`: a fall from 650 m lands in the village after ~17 s, Map 001
   in the world ~9 s before).
 - Moving objects run in their own height band or lane; the clearance check must report 0 hits.
+- A lip on a wall (stacked containers, sills) is no footing: the player slides off it and cannot jump from it, so
+  spamming jump never walks up a wall (`src/player/Player.ts` lipWallNormal, `devtools/out/climbprobe.cjs`).
 - The exit gate opens only when the next map is in the world.
 
 ## 5. Route design rule (every map from Map 004 on)

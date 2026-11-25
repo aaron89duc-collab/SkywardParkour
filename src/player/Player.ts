@@ -70,6 +70,10 @@ type Move = {
 const FEET = PHYS.capsuleHalfHeight + PHYS.capsuleRadius; // capsule center -> feet
 const _feet = new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0);
+/** footing probes inside the capsule (radius 0.3): a support has to reach under these, not just the rim */
+const INNER_PROBES = [[0, 0], [0.14, 0], [-0.14, 0], [0, 0.14], [0, -0.14]];
+const WALL_DIRS = Array.from({ length: 8 }, (_, i) => new THREE.Vector3(Math.sin((i * Math.PI) / 4), 0, Math.cos((i * Math.PI) / 4)));
+const _lp = new THREE.Vector3(), _lpN = new THREE.Vector3();
 const EDGE_PROBES = [[0.27, 0], [-0.27, 0], [0, 0.27], [0, -0.27], [0.19, 0.19], [-0.19, 0.19], [0.19, -0.19], [-0.19, -0.19]];
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
@@ -156,6 +160,9 @@ export class Player {
   private reflexDir = new THREE.Vector3();
   /** walked (not ran) off an edge: the body tips over the edge first (lighter gravity for a moment) */
   private slipT = 0;
+  /** sliding off a lip of a wall: pushed away from the wall for a moment, the stick cannot hold the body on it */
+  private lipPushT = 0;
+  private lipN = new THREE.Vector3();
   private jumpedThisTick = false;
   private pushTimer = 0;
   private rollT = 0;
@@ -246,6 +253,21 @@ export class Player {
     this.state = 'air';
     this.ledge = null; this.move = null; this.ladder = null; this.riding = null; this.padFlight = null; this.padCharge = null;
     this.setBody();
+  }
+
+  /** standing only on a thin lip of a wall (no ground under the capsule's inner footprint, a wall right beside it):
+   *  the wall's normal (pointing away from it), else null */
+  private lipWallNormal(): THREE.Vector3 | null {
+    const f = this.pos.y - FEET;
+    for (const [ox, oz] of INNER_PROBES) {
+      const g = this.physics.raycast(_lp.set(this.pos.x + ox, f + 0.15, this.pos.z + oz), DOWN, 0.45);
+      if (g && g.normal.y > 0.6) return null; // real footing
+    }
+    for (const d of WALL_DIRS) {
+      const w = this.physics.raycast(_lp.set(this.pos.x, f + 0.55, this.pos.z), d, PHYS.capsuleRadius + 0.14);
+      if (w && Math.abs(w.normal.y) < 0.35) return _lpN.set(w.normal.x, 0, w.normal.z).normalize();
+    }
+    return null;
   }
 
   private setBody() {
@@ -378,6 +400,7 @@ export class Player {
       if (dl > maxStep) diff.multiplyScalar(maxStep / dl);
       this.vel.x += diff.x;
       this.vel.z += diff.z;
+      if (this.lipPushT > 0) { this.lipPushT -= dt; this.vel.x = this.lipN.x * 2.2; this.vel.z = this.lipN.z * 2.2; }
       if (wishLen > 0.1 && this.state !== 'land') {
         const targetYaw = Math.atan2(this.wish.x, this.wish.z);
         const turn = (this.grounded ? PHYS.turnSpeedGround : PHYS.turnSpeedAir) * dt;
@@ -457,6 +480,22 @@ export class Player {
       if (g && g.normal.y > 0.6) this.grounded = true;
     }
     if (desired.y > 0 && mv.y < desired.y * 0.5 - 1e-4) this.vel.y = Math.min(this.vel.y, 0);
+    // a lip on a wall (the seam of stacked containers, a sill) only touches the rim of the capsule: that is no
+    // footing. Without this, pressing jump again and again walked the player up a wall one lip at a time.
+    if (!this.jumpedThisTick) {
+      // resting on a lip without real footing (grounded by the controller, or held up in the air by it):
+      // no jump from it, slide off away from the wall, and no fall speed builds up while held
+      const heldUp = !this.grounded && desired.y < -1e-3 && mv.y > desired.y * 0.3;
+      if (this.grounded || heldUp) {
+        const n = this.lipWallNormal();
+        if (n) {
+          this.grounded = false;
+          this.vel.y = Math.max(Math.min(this.vel.y, 0), -2);
+          this.lipN.copy(n);
+          this.lipPushT = 0.2;
+        }
+      }
+    }
     const blockedX = Math.abs(desired.x) > 1e-5 ? mv.x / desired.x : 1;
     const blockedZ = Math.abs(desired.z) > 1e-5 ? mv.z / desired.z : 1;
     if (!this.grounded) {
