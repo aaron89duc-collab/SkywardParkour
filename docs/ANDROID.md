@@ -10,32 +10,27 @@ APK, Map 001 is inside it, the other maps download from R2 exactly as on the web
   - `AndroidManifest.xml` – landscape (`sensorLandscape`), hardware acceleration;
   - `app/build.gradle` – versionCode / versionName from the build (`-PversionCode`), release signing from
     environment variables (`ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`).
-  - icons and splash screens: `node devtools/android-icons.mjs` (from `public/icon-512.png`).
+  - icons (Android + web) and splash screens: `node devtools/android-icons.mjs` (from `devtools/icon/skyward-icon-master.png`).
 - In the game: the Android back button pauses / resumes, and leaves the app from the menu (`src/main.ts`,
   `Game.onBackButton`); the fullscreen button is hidden in the app (`isNativeApp`).
 
 ## Building the APK on your Ubuntu server (main way)
-Same idea as FivePitch: one script in the repository, everything that belongs to the server (version numbers,
-signing key, finished files) stays outside git in `/root/skyward-android/`.
+Same idea as FivePitch: one script in the repository; what belongs to the server (version numbers, signing key,
+finished files) stays outside the source, in `/root/skyward-android/`. Step-by-step guide (Vietnamese):
+https://claude.ai/artifact/PjLvduETo3gp5nbcrEDQT6
 
-First time (Ubuntu 22.04 / 24.04, x86-64, ~4 GB RAM incl. swap, ~6 GB free disk):
+Short version (Ubuntu 22.04 / 24.04, x86-64, ~4 GB RAM incl. swap, ~6 GB free disk, a user with sudo):
 ```bash
-git clone <your GitHub repository URL> ~/skyward-parkour
-cd ~/skyward-parkour
-sudo bash devtools/android/build-apk.sh
+# zip the skyward-parkour folder on Windows, copy it to the server (scp / WinSCP), then:
+cd ~ && rm -rf ~/skyward-parkour && unzip -q skyward-parkour.zip
+cd ~/skyward-parkour && sudo nice -n 19 bash devtools/android/build-apk.sh --bump
 ```
 The first run installs OpenJDK 21, Node.js 22 and the Android SDK (`/opt/android-sdk`), creates
-`/root/skyward-android/app.properties`, creates the signing key and builds (10–20 min the first time, then 2–4 min).
-It puts a copy of the new key in `~/skyward-android-key-backup/`: download it to your PC, keep it safe (never in git),
-then delete that folder on the server.
-
-Every next build (after pushing to GitHub):
-```bash
-cd ~/skyward-parkour && sudo bash devtools/android/build-apk.sh --bump
-```
-`--bump` raises `VERSION_CODE` by one (an update must have a higher code than the installed app); the script runs
-`git pull`, builds the last commit (`git archive HEAD`, like Vercel), signs and checks the APK. Other options:
-`--no-pull`, `--setup` (tools only), `--help`.
+`/root/skyward-android/app.properties` and the signing key (a copy goes to `~/skyward-android-key-backup/`: download
+it, keep it safe, never in git, then delete it on the server) and builds: 20–30 min the first time, then 3–5 min.
+The script copies the folder to `/root/skyward-android/build` and builds there (the folder itself is not changed),
+at the lowest CPU / disk priority. Options: `--bump` (VERSION_CODE + 1, use it for every APK you hand out),
+`--pull` (git pull first, only for a git clone), `--setup` (tools only), `--help`.
 
 Files (`/root/skyward-android/`):
 | File | What |
@@ -46,14 +41,12 @@ Files (`/root/skyward-android/`):
 | `out/SkywardParkour-<version>-<code>.aab` | for Google Play (Play only takes .aab) |
 | `logs/build-*.log` | one log per build – send it to Claude if a build fails |
 
-A copy of the APK also goes to `~/skyward-apk/` of the user who ran sudo. On the PC (PowerShell):
-`scp <user>@<server>:~/skyward-apk/SkywardParkour-latest.apk .` then copy it to the phone (or open it from Drive /
-Zalo) and install (allow "install unknown apps" once).
+A copy of the APK also goes to `~/skyward-apk/` of the user who ran sudo:
+`scp <user>@<server>:~/skyward-apk/SkywardParkour-latest.apk .` on the PC, then copy it to the phone and install.
 
-Keep the keystore and its password safe and **never commit them**: every update must be signed with the same key,
-otherwise Android refuses to install it over the old version (players would have to uninstall and lose progress).
-To move the build to another server, copy `/root/skyward-android/` (at least the key, `keystore.properties` and
-`app.properties`) before the first build there.
+Every update must be signed with the same key, otherwise Android refuses to install it over the old version (players
+would have to uninstall and lose progress). To move the build to another server, copy `/root/skyward-android/` (at
+least the key, `keystore.properties` and `app.properties`) before the first build there.
 
 ## Building with GitHub Actions (optional)
 `devtools/github/android-apk.yml` does the same on GitHub: create `.github/workflows/android-apk.yml` from it and

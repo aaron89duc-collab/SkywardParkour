@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Skyward Parkour – build the Android app (APK to install, AAB for Google Play) on an Ubuntu server.
 #
-#   sudo bash devtools/android/build-apk.sh            # git pull, build, sign
-#   sudo bash devtools/android/build-apk.sh --bump     # the same, VERSION_CODE + 1 first
-#   sudo bash devtools/android/build-apk.sh --no-pull  # build the code as it is on the server now
+#   sudo bash devtools/android/build-apk.sh            # build + sign the code in this folder
+#   sudo bash devtools/android/build-apk.sh --bump     # the same, VERSION_CODE + 1 first (each new APK you hand out)
+#   sudo bash devtools/android/build-apk.sh --pull     # git pull first (only when this folder is a git clone)
 #   sudo bash devtools/android/build-apk.sh --setup    # only install / check the tools
 #
-# What belongs to this server stays outside the repository, in $SKY_HOME (default /root/skyward-android):
+# What belongs to this server stays outside the source folder, in $SKY_HOME (default /root/skyward-android):
 #   app.properties       VERSION_CODE, VERSION_NAME, VITE_* build settings      (created on the first run)
 #   keystore.properties  signing passwords, chmod 600                           (created on the first run)
 #   skyward-release.jks  signing key – BACK IT UP outside the server             (created on the first run)
 #   out/                 SkywardParkour-<version>-<code>.apk / .aab, SkywardParkour-latest.apk
 #   logs/                one log per build
-# The build uses the last commit of the checkout (git archive HEAD), like Vercel / CI – not uncommitted edits.
+# The source folder can be an unzipped copy or a git clone; it is copied to $SKY_HOME/build and built there
+# (node_modules, dist, .git and old Android build output are left out), so the folder itself is never changed.
 # Tools installed on the first run: OpenJDK 21, Node.js 22, Android SDK in /opt/android-sdk.
 # Needs Ubuntu 22.04 / 24.04 on x86-64, ~4 GB RAM (+swap) and ~6 GB disk.
 set -euo pipefail
@@ -35,10 +36,11 @@ need_root() { [[ ${EUID:-$(id -u)} -eq 0 ]] || die "$1 – run the script with s
 
 usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
-MODE=build PULL=1 BUMP=0
+MODE=build PULL=0 BUMP=0
 for a in "$@"; do
   case "$a" in
     --setup) MODE=setup ;;
+    --pull) PULL=1 ;;
     --no-pull) PULL=0 ;;
     --bump) BUMP=1 ;;
     -h|--help) usage ;;
@@ -94,7 +96,7 @@ setup_tools() {
   if ! node_ok; then
     need_root "Installing Node.js 22"
     log "Installing Node.js 22 (NodeSource)"
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - || die "Could not set up the Node.js 22 package source."
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
     node_ok || die "Node.js 22+ is needed (found: $(node -v 2>/dev/null || echo none))."
   fi
@@ -104,7 +106,8 @@ setup_tools() {
     if [[ ! -x "$(sdkmanager_bin)" ]]; then
       log "Installing the Android command-line tools → $ANDROID_HOME"
       local tmp; tmp="$(mktemp -d)"
-      curl -fL --retry 3 -o "$tmp/clt.zip" "https://dl.google.com/android/repository/$CMDLINE_TOOLS_ZIP"
+      curl -fL --retry 3 -o "$tmp/clt.zip" "https://dl.google.com/android/repository/$CMDLINE_TOOLS_ZIP" \
+        || die "Could not download the Android tools from dl.google.com (does the server have internet access?)"
       unzip -q "$tmp/clt.zip" -d "$tmp"
       mkdir -p "$ANDROID_HOME/cmdline-tools"
       rm -rf "$ANDROID_HOME/cmdline-tools/latest"
@@ -198,24 +201,27 @@ remind_key() {
 
 # ---------------------------------------------------------------- build
 prepare_source() {
-  if (( PULL )) && [[ -d "$REPO/.git" ]]; then
+  if (( PULL )); then
+    [[ -d "$REPO/.git" ]] || die "--pull: $REPO is not a git clone (upload the new zip instead)."
     log "git pull"
     if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
-      sudo -u "$SUDO_USER" -H git -C "$REPO" pull --ff-only || die "git pull failed – fix it, or build with --no-pull."
+      sudo -u "$SUDO_USER" -H git -C "$REPO" pull --ff-only || die "git pull failed – fix it, or build without --pull."
     else
-      git -c safe.directory="$REPO" -C "$REPO" pull --ff-only || die "git pull failed – fix it, or build with --no-pull."
+      git -c safe.directory="$REPO" -C "$REPO" pull --ff-only || die "git pull failed – fix it, or build without --pull."
     fi
   fi
-  log "Copying the code → $BUILD"
+  log "Copying the code $REPO → $BUILD"
   rm -rf "$BUILD"; mkdir -p "$BUILD"
-  if [[ -d "$REPO/.git" ]]; then
-    git -c safe.directory="$REPO" -C "$REPO" archive --format=tar HEAD | tar -x -C "$BUILD"
-    COMMIT="$(git -c safe.directory="$REPO" -C "$REPO" log -1 --format='%h %s')"
+  tar -C "$REPO" --exclude=node_modules --exclude=./dist --exclude=./content-dist --exclude=./.git \
+    --exclude=./server/.wrangler --exclude=./devtools/out --exclude=./android/app/build --exclude=./android/build \
+    --exclude=./android/.gradle --exclude=./android/app/src/main/assets/public \
+    --exclude=./android/capacitor-cordova-android-plugins -cf - . | tar -x -C "$BUILD"
+  # a zip made on Windows may carry CRLF line endings: Linux scripts need LF
+  sed -i 's/\r$//' "$BUILD/android/gradlew"
+  if [[ -d "$REPO/.git" ]] && command -v git >/dev/null 2>&1; then
+    COMMIT="git $(git -c safe.directory="$REPO" -C "$REPO" log -1 --format='%h %s' 2>/dev/null || echo '?')"
   else
-    tar -C "$REPO" --exclude=node_modules --exclude=./dist --exclude=./.git --exclude=./android/app/build \
-      --exclude=./android/build --exclude=./android/.gradle --exclude=./android/app/src/main/assets/public -cf - . \
-      | tar -x -C "$BUILD"
-    COMMIT="(not a git checkout)"
+    COMMIT="folder $REPO ($(date -r "$REPO/package.json" '+package.json %F %H:%M'))"
   fi
   printf '    %s\n' "$COMMIT"
 }
@@ -274,6 +280,9 @@ collect() {
 }
 
 # ---------------------------------------------------------------- main
+# lowest CPU / disk priority: the server may be running other services (FivePitch) while this builds
+renice -n 19 -p $$ >/dev/null 2>&1 || true
+ionice -c 3 -p $$ >/dev/null 2>&1 || true
 init_home
 LOG="$SKY_HOME/logs/build-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
