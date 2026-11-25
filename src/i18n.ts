@@ -114,6 +114,15 @@ const STR = {
   'common.done': { en: 'Done', vi: 'Xong' },
   'common.cancel': { en: 'Cancel', vi: 'Huỷ' },
   'common.save': { en: 'Save', vi: 'Lưu' },
+  'common.close': { en: 'Close', vi: 'Đóng' },
+  // Android app download (website only)
+  'apk.pill': { en: 'Get the Android app', vi: 'Tải app Android' },
+  'apk.title': { en: 'Android app', vi: 'App Android' },
+  'apk.lead': { en: 'Skyward Parkour as an app: full screen without browser bars, Map 001 plays offline, the other maps download just like here.', vi: 'Skyward Parkour dạng ứng dụng: toàn màn hình, không có thanh trình duyệt, Map 001 chơi được khi không có mạng, các map khác tự tải về như trên web.' },
+  'apk.steps': { en: '<b>1.</b> Tap <b>Download APK</b>. If the browser warns about the file, tap <b>Download anyway</b>.<br><b>2.</b> Open the downloaded file.<br><b>3.</b> If asked, allow <b>Install unknown apps</b> for your browser, then tap <b>Install</b> (if Play Protect warns: <b>Install anyway</b>).', vi: '<b>1.</b> Bấm <b>Tải APK</b>. Nếu trình duyệt cảnh báo tệp, chọn <b>Vẫn tải xuống</b>.<br><b>2.</b> Mở tệp vừa tải.<br><b>3.</b> Nếu được hỏi, cho phép <b>Cài ứng dụng không rõ nguồn gốc</b> cho trình duyệt, rồi bấm <b>Cài đặt</b> (nếu Play Protect cảnh báo: <b>Vẫn cài đặt</b>).' },
+  'apk.desktop': { en: 'For Android phones and tablets: open this page on the phone, or download here and copy the file to it.', vi: 'Dành cho điện thoại / máy tính bảng Android: mở trang này trên điện thoại, hoặc tải ở đây rồi chép tệp sang máy.' },
+  'apk.note': { en: 'Progress in the browser and in the app is saved separately.', vi: 'Tiến độ trên trình duyệt và trong app được lưu riêng.' },
+  'apk.download': { en: 'Download APK', vi: 'Tải APK' },
   // finish
   'fin.thisRun': { en: 'Climbing time this run', vi: 'Thời gian leo lượt này' },
   'fin.best': { en: 'Best: {t}', vi: 'Tốt nhất: {t}' },

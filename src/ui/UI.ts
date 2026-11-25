@@ -2,7 +2,7 @@ import type { ZoneData } from '../world/MapTypes';
 import type { SyncView } from '../content/AutoSync';
 import type { SaveData, GameMode } from '../systems/Score';
 import type { Quality } from '../config';
-import { fullscreenSupported, isFullscreen, isIOS, isStandalone } from './Fullscreen';
+import { fullscreenSupported, isAndroid, isFullscreen, isIOS, isNativeApp, isStandalone } from './Fullscreen';
 import type { OnlineUI } from './OnlineUI';
 import { t, loc, LANGS, lang, setLang, onLang } from '../i18n';
 
@@ -44,6 +44,13 @@ const fmtTime = (s: number) => {
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
+/** Android app (APK) offered on the website. VITE_APK_URL overrides the link, VITE_APK_URL=off hides the offer. */
+const APK_ENV = (import.meta.env.VITE_APK_URL as string | undefined)?.trim();
+const APK_URL = APK_ENV === 'off' ? '' : APK_ENV || 'https://pub-29e673b58966438a92f3f7d2d0c9ef6d.r2.dev/SkywardParkour-latest.apk';
+/** not inside the app itself, and not on iPhone / iPad (an APK cannot be installed there) */
+const offerApk = () => !!APK_URL && !isNativeApp() && !isIOS();
+const DL_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>';
+
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = '') => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -63,6 +70,7 @@ export class UI {
   private pause: HTMLDivElement;
   private settings: HTMLDivElement;
   private finish: HTMLDivElement;
+  private apk: HTMLDivElement;
   private toastEl: HTMLDivElement;
   private toastTimer = 0;
   private speed: HTMLDivElement;
@@ -150,6 +158,8 @@ export class UI {
     parent.appendChild(this.settings);
     this.finish = el('div', 'overlay hidden');
     parent.appendChild(this.finish);
+    this.apk = el('div', 'overlay hidden');
+    parent.appendChild(this.apk);
     onLang(() => this.relabel());
   }
 
@@ -166,6 +176,7 @@ export class UI {
     if (this.hudBands) this.setupHUD(...this.hudBands);
     if (!this.pause.classList.contains('hidden')) this.showPause(this.character);
     if (!this.settings.classList.contains('hidden')) this.openSettings(this.settingsReturn);
+    if (!this.apk.classList.contains('hidden')) this.openApk();
     if (this.menuArgs && !this.menu.classList.contains('hidden')) this.showMenu(...this.menuArgs);
     this.online?.relabel();
   }
@@ -223,7 +234,10 @@ export class UI {
       <div style="display:flex;flex-direction:column;align-items:center">
         <div class="logo"><span class="l1">Skyward</span><span class="l2">Parkour</span></div>
         <div class="sub">${t('menu.sub')}</div>
-        ${info.name ? `<button class="player-chip" data-a="name">${esc(info.name)}${info.tag ? ` <i>#${esc(info.tag)}</i>` : ''} · <u>${t('menu.rename')}</u></button>` : ''}
+        <div class="top-chips">
+          ${info.name ? `<button class="player-chip" data-a="name">${esc(info.name)}${info.tag ? ` <i>#${esc(info.tag)}</i>` : ''} · <u>${t('menu.rename')}</u></button>` : ''}
+          ${offerApk() ? `<button class="apk-pill${isAndroid() ? ' android' : ''}" data-a="apk">${DL_ICON}${t('apk.pill')}</button>` : ''}
+        </div>
       </div>
       <div class="center">
         <div class="chars">
@@ -258,11 +272,30 @@ export class UI {
     this.menu.querySelector('[data-a=ach]')?.addEventListener('click', () => { this.h.onClick(); this.h.onAchievements?.(); });
     this.menu.querySelector('[data-a=maps]')?.addEventListener('click', () => { this.h.onClick(); this.online?.openMaps(); });
     this.menu.querySelector('[data-a=lb]')?.addEventListener('click', () => { this.h.onClick(); this.online?.openLeaderboard(); });
+    this.menu.querySelector('[data-a=apk]')?.addEventListener('click', () => { this.h.onClick(); this.openApk(); });
     this.menu.querySelector('[data-a=name]')?.addEventListener('click', () => { this.h.onClick(); if (this.online) { this.online.onNameSet = () => this.refreshMaps(); this.online.openName(); } });
     (this.menu.querySelector('[data-a=settings]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); this.openSettings('menu'); });
     this.menu.classList.remove('hidden');
   }
-  hideMenu() { this.menu.classList.add('hidden'); }
+  hideMenu() { this.menu.classList.add('hidden'); this.apk.classList.add('hidden'); }
+
+  // ---------------- Android app download (website)
+  openApk() {
+    const icon = `${import.meta.env.BASE_URL}icon-192.png`;
+    this.apk.innerHTML = `<div class="panel apk-panel"><h2>${t('apk.title')}</h2>
+      <div class="apk-head"><img src="${icon}" alt=""><p>${t('apk.lead')}</p></div>
+      ${isAndroid() ? `<div class="apk-steps">${t('apk.steps')}</div>` : `<div class="apk-steps">${t('apk.desktop')}</div>`}
+      <div class="stack" style="margin-top:14px">
+        <a class="btn" data-a="get" href="${esc(APK_URL)}" download="SkywardParkour.apk" rel="noopener">${t('apk.download')}</a>
+        <button class="btn secondary" data-a="close">${t('common.close')}</button>
+      </div>
+      <div class="note">${t('apk.note')}</div></div>`;
+    const close = () => this.apk.classList.add('hidden');
+    (this.apk.querySelector('[data-a=get]') as HTMLAnchorElement).addEventListener('click', () => this.h.onClick());
+    (this.apk.querySelector('[data-a=close]') as HTMLButtonElement).addEventListener('click', () => { this.h.onClick(); close(); });
+    this.apk.onclick = (e) => { if (e.target === this.apk) close(); };
+    this.apk.classList.remove('hidden');
+  }
 
   // ---------------- HUD
   /** Altitude bar for the map the player is in: world heights y0..y1 with its zone bands. */

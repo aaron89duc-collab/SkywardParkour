@@ -48,6 +48,15 @@ Every update must be signed with the same key, otherwise Android refuses to inst
 would have to uninstall and lose progress). To move the build to another server, copy `/root/skyward-android/` (at
 least the key, `keystore.properties` and `app.properties`) before the first build there.
 
+## Download link on the website
+The website's main menu offers the APK ("Get the Android app" → a panel with install steps and a Download APK
+button); it is hidden inside the app itself and on iPhone / iPad. The link is the APK on R2:
+`https://pub-29e673b58966438a92f3f7d2d0c9ef6d.r2.dev/SkywardParkour-latest.apk` (`src/ui/UI.ts`, `APK_URL`).
+Another address: set `VITE_APK_URL` on Vercel; `VITE_APK_URL=off` hides the offer.
+To publish a new version: build with `--bump`, upload `SkywardParkour-latest.apk` to the same R2 bucket under the
+same name (overwrite). The website does not need a new deploy; players who installed it update by installing the
+new file over the old app (same signing key, progress kept).
+
 ## Building with GitHub Actions (optional)
 `devtools/github/android-apk.yml` does the same on GitHub: create `.github/workflows/android-apk.yml` from it and
 add the secrets `ANDROID_KEYSTORE_BASE64` (`base64 -w0 skyward-release.jks`), `ANDROID_KEYSTORE_PASSWORD`,
