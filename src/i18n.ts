@@ -168,6 +168,8 @@ const STR = {
   'toast.mapInfo': { en: 'Map {no} · {y0}–{y1} m', vi: 'Map {no} · {y0}–{y1} m' },
   'toast.ime': { en: 'Vietnamese typing (Unikey / EVKey) is on', vi: 'Bộ gõ tiếng Việt (Unikey / EVKey) đang bật' },
   'toast.imeSub': { en: 'It can swallow W A S D – switch it to English (E) while playing, or use the arrow keys', vi: 'Bộ gõ có thể "nuốt" phím W A S D – chuyển sang chế độ E (tiếng Anh) khi chơi, hoặc dùng phím mũi tên' },
+  'toast.bloomOff': { en: 'Glow effect turned off', vi: 'Đã tắt hiệu ứng phát sáng' },
+  'toast.bloomOffSub': { en: 'Your graphics card showed a black screen with it – the rest of High quality stays on', vi: 'Card đồ hoạ của máy bị màn hình đen với hiệu ứng này – các phần khác của chế độ Cao vẫn giữ' },
   // touch buttons
   'touch.drop': { en: 'DROP', vi: 'XUỐNG' },
   'touch.dropAria': { en: 'Drop', vi: 'Xuống' },

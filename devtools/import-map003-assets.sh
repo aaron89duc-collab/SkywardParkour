@@ -31,3 +31,9 @@ ERR=0.06 node devtools/pipeline/prefab-vc.mjs "$R/model-rough (2).glb" $O contai
 node devtools/pipeline/recolor.mjs $O/shipping_container.glb $O/container_red.glb 2 1.15 1.0
 node devtools/pipeline/recolor.mjs $O/shipping_container.glb $O/container_yellow.glb 42 1.6 0.95
 node devtools/pipeline/recolor.mjs $O/shipping_container.glb $O/container_green.glb 128 1.05 0.9
+# stacked shipping containers collide as clean boxes (the Meshy shell had seams to climb and gaps to slip into).
+# Same bounds as the old mesh (top = the corner castings, 0.986); bottom 0.014 below the base: stacked at a 1.0 pitch the
+# boxes meet flush.
+for c in shipping_container container_red container_yellow container_green; do
+  node devtools/pipeline/boxcol.mjs packs/map003/assets/map003/$c.col.bin -0.456 0.413 -0.014 0.986 -1.054 1.008
+done

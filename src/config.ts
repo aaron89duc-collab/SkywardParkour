@@ -127,7 +127,8 @@ export function detectDefaultQuality(): Quality {
 
 export const QUALITY_PRESETS: Record<Quality, { pixelRatio: number; maxPixels: number; shadows: boolean; shadowMap: number; bloom: boolean; clouds: number; grass: number; lodDistance: number; antialias: boolean }> = {
   // maxPixels caps the drawing buffer (CSS px * pixelRatio^2): a 4K / retina laptop would otherwise draw 8+ MP
-  low: { pixelRatio: 1, maxPixels: 0.95e6, shadows: true, shadowMap: 1024, bloom: false, clouds: 70, grass: 0.45, lodDistance: 22, antialias: false },
-  medium: { pixelRatio: 1.5, maxPixels: 2.0e6, shadows: true, shadowMap: 2048, bloom: false, clouds: 100, grass: 0.75, lodDistance: 34, antialias: true },
+  // low: no shadow map at all (the player keeps a blob shadow) – the shadow pass drew about half of the triangles
+  low: { pixelRatio: 1, maxPixels: 0.9e6, shadows: false, shadowMap: 1024, bloom: false, clouds: 50, grass: 0.35, lodDistance: 18, antialias: false },
+  medium: { pixelRatio: 1.25, maxPixels: 1.6e6, shadows: true, shadowMap: 1024, bloom: false, clouds: 85, grass: 0.65, lodDistance: 28, antialias: true },
   high: { pixelRatio: 2, maxPixels: 3.6e6, shadows: true, shadowMap: 2048, bloom: true, clouds: 140, grass: 1, lodDistance: 52, antialias: true },
 };

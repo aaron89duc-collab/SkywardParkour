@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { PHYS, QUALITY_PRESETS, detectDefaultQuality, lowerQuality, minQuality, type Quality } from '../config';
 import { Physics } from './Physics';
 import { Assets } from './Assets';
@@ -247,7 +248,9 @@ export class Game {
       }
       if (added) {
         this.maps.setLodDistance(QUALITY_PRESETS[this.quality].lodDistance);
-        this.renderer.compile(this.scene, this.cam.camera);
+        // compile the new shaders in the background where the browser can (no frame-long stall)
+        const r = this.renderer as THREE.WebGLRenderer & { compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<unknown> };
+        if (r.compileAsync) await r.compileAsync(this.scene, this.cam.camera).catch(() => undefined); else this.renderer.compile(this.scene, this.cam.camera);
       }
       if (added || gone.length) this.admin?.mapsChanged();
       this.syncGates();
@@ -290,7 +293,8 @@ export class Game {
 
   private updateDropShadow() {
     const P = this.player;
-    const air = P.state === 'air' || P.state === 'hang' || P.state === 'ladder' || (P.state === 'move' && P.moveKind !== 'climb');
+    // without a shadow map (Low) the blob is the player's only shadow: keep it on the ground too
+    const air = !this.env.sun.castShadow || P.state === 'air' || P.state === 'hang' || P.state === 'ladder' || (P.state === 'move' && P.moveKind !== 'climb');
     const ds = this.dropShadow;
     const mat = ds.material as THREE.MeshBasicMaterial;
     if (!air) { mat.opacity = Math.max(0, mat.opacity - 0.12); ds.visible = mat.opacity > 0.01; return; }
@@ -384,16 +388,59 @@ export class Game {
     return out;
   }
 
+  /** bloom turned itself off on this device (black frames): High then looks like Medium plus the extras */
+  private bloomBroken = (() => { try { return localStorage.getItem('skyward-parkour.nobloom') === '1'; } catch { return false; } })();
   private setupComposer(bloom: boolean) {
-    if (!bloom) { this.composer = null; this.bloom = null; return; }
+    this.composer?.dispose();
+    if (!bloom || this.bloomBroken || !this.bloomSupported()) { this.composer = null; this.bloom = null; return; }
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+    // HDR target: multisampled only where the GPU can do it for half floats (otherwise the target is incomplete = black)
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    let samples = 0;
+    try { const s = gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES) as Int32Array | null; if (s && s.length && s[0] >= 4) samples = 4; } catch { /* WebGL1 */ }
+    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples });
     const composer = new EffectComposer(this.renderer, rt);
     composer.addPass(new RenderPass(this.scene, this.cam.camera));
+    // a single NaN / infinite pixel (a broken normal in some model) is spread over the whole screen by the bloom blur:
+    // clean the HDR image first, so the worst case is one dark pixel instead of a black screen
+    composer.addPass(new ShaderPass({
+      uniforms: { tDiffuse: { value: null } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'uniform sampler2D tDiffuse; varying vec2 vUv; void main() { vec4 c = texture2D(tDiffuse, vUv); bvec4 bad = bvec4(c.r != c.r || c.r > 6e4, c.g != c.g || c.g > 6e4, c.b != c.b || c.b > 6e4, c.a != c.a); if (any(bad)) c = vec4(0.0, 0.0, 0.0, 1.0); gl_FragColor = min(c, vec4(64.0)); }',
+    }));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.55, 0.9);
     composer.addPass(this.bloom);
     composer.addPass(new OutputPass());
     this.composer = composer;
+    this.blackChecks = 0;
+  }
+  private bloomSupported() {
+    const gl = this.renderer.getContext();
+    return typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext && !!gl.getExtension('EXT_color_buffer_float');
+  }
+  /** High quality only: a few pixels of the finished frame now and then. Several black frames in a row while the sky
+   *  should be visible = the bloom pipeline is broken on this GPU: switch it off for good (remembered) and say so. */
+  private blackChecks = 0;
+  private blackTimer = 0;
+  private watchBlackFrames(dt: number) {
+    if (!this.composer || this.state !== 'playing') return;
+    this.blackTimer += dt;
+    if (this.blackTimer < 1.5) return;
+    this.blackTimer = 0;
+    const gl = this.renderer.getContext();
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(4);
+    let lit = 0;
+    for (const [fx, fy] of [[0.2, 0.8], [0.5, 0.85], [0.8, 0.8], [0.3, 0.5], [0.7, 0.5], [0.5, 0.2]]) {
+      gl.readPixels(Math.floor(w * fx), Math.floor(h * fy), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      if (px[0] + px[1] + px[2] > 12) lit++;
+    }
+    if (lit > 0) { this.blackChecks = 0; return; }
+    if (++this.blackChecks < 3) return;
+    this.bloomBroken = true;
+    try { localStorage.setItem('skyward-parkour.nobloom', '1'); } catch { /* ignore */ }
+    this.setupComposer(false);
+    this.onResize();
+    this.ui.toast(t('toast.bloomOff'), t('toast.bloomOffSub'), false, 5000);
   }
 
   applyQuality(q: Quality) {
@@ -421,6 +468,8 @@ export class Game {
     return det;
   }
   private dynScale = 1;
+  private dynCooldown = 0;
+  private slowStreak = 0;
   private dynTimer = 0;
   private fpsWindow: number[] = [];
   private slowWindows = 0;
@@ -435,13 +484,19 @@ export class Game {
     const target = this.isTouch ? 30 : 50;
     const minScale = 0.6;
     let next = this.dynScale;
+    // calm: every change re-allocates the frame buffers (a hitch of its own), so step down only after two slow
+    // windows in a row and back up only when there is plenty of headroom, never more than once per 6 s
+    this.dynCooldown = Math.max(0, this.dynCooldown - 2);
     if (avg < target * 0.85) {
-      next = Math.max(minScale, this.dynScale - 0.12);
+      this.slowStreak++;
+      if (this.slowStreak >= 2 && this.dynCooldown <= 0) { next = Math.max(minScale, this.dynScale - 0.12); this.slowStreak = 0; }
       if (this.dynScale <= minScale + 1e-3) this.slowWindows++;
     } else {
+      this.slowStreak = 0;
       this.slowWindows = 0;
-      if (avg > target * 1.45) next = Math.min(1, this.dynScale + 0.08);
+      if (avg > target * 1.45 && this.dynCooldown <= 0) next = Math.min(1, this.dynScale + 0.08);
     }
+    if (next !== this.dynScale) this.dynCooldown = 6;
     if (this.slowWindows >= 2 && this.save.settings.quality == null) {
       const lower = lowerQuality(this.quality);
       if (lower) {
@@ -755,7 +810,7 @@ export class Game {
     this.maps.update(this.time, this.cam.camera.position, this.env.sunTint, dt);
     this.audio.update(dt, this.state === 'playing' ? this.player.feetY : 0, this.state === 'playing' ? -this.player.vel.y : 0, this.time);
 
-    if (this.composer) this.composer.render(dt);
+    if (this.composer) { this.composer.render(dt); this.watchBlackFrames(dt); }
     else this.renderer.render(this.scene, this.cam.camera);
   }
 

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { breathe } from '../core/Budget';
 import { Assets, bakedGeometry } from '../core/Assets';
 import { Physics } from '../core/Physics';
 import type { PrefabData } from './MapTypes';
@@ -124,7 +125,8 @@ export class PrefabSystem {
       }
       this.group.add(lod0);
       const batch: Batch = { id, lod0, lod1, matrices: [], positions: [], radius: [] };
-      list.forEach((it, i) => {
+      for (const [i, it] of list.entries()) {
+        await breathe();
         const pos = new THREE.Vector3(...it.p);
         const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(it.r));
         const m = new THREE.Matrix4().compose(pos, q, new THREE.Vector3(it.s, it.s, it.s));
@@ -133,7 +135,7 @@ export class PrefabSystem {
         batch.radius.push(it.s);
         lod0.setMatrixAt(i, m);
         if (col && it.col !== false && !it.scenery) this.addCollider(col.positions, col.indices, m);
-      });
+      }
       lod0.instanceMatrix.needsUpdate = true;
       lod0.computeBoundingSphere();
       this.batches.push(batch);

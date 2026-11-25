@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { breathe } from '../core/Budget';
 import { Assets } from '../core/Assets';
 import { Physics } from '../core/Physics';
 import type { MapData, MapRegistryEntry, ZoneData } from './MapTypes';
@@ -146,12 +147,17 @@ export class MapManager {
     const footprints: Footprint[] = [];
     for (const k of data.kit) if (k.k === 'building') footprints.push({ x: k.p[0], z: k.p[2], w: k.s[0], d: k.s[2], r: THREE.MathUtils.degToRad(k.r ?? 0) });
     for (const p of data.prefabs) if (p.id === 'brick_building' && Math.abs(p.p[1] - (data.terrain.center?.[1] ?? 0)) < 0.5) footprints.push({ x: p.p[0], z: p.p[2], w: 1.05 * p.s, d: 1.0 * p.s, r: THREE.MathUtils.degToRad(p.r) });
+    await breathe();
     group.add(buildTerrain(data.terrain, this.physics, footprints));
+    await breathe();
 
     const kit = new KitBuilder();
     for (const k of data.kit) kit.add(k);
+    await breathe();
     for (const m of kit.build()) group.add(m);
+    await breathe();
     for (const c of kit.colliders) {
+      await breathe();
       if (c.type === 'box') this.physics.addBox(c.center, c.half, c.quat, c.groups);
       else if (c.type === 'cylinder') this.physics.addCylinder(c.center, c.halfHeight, c.radius, c.quat);
       else this.physics.addCapsule(c.center, c.halfHeight, c.radius, c.quat);

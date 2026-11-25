@@ -279,13 +279,13 @@ B.mark('main', P(p3), 'pallet on K7');
 B.mark('main', [-52.4, k8.top, -17.6], 'beam to K8');
 B.mark('main', P(k8, 0, -1.4), 'K8');
 B.mark('main', P(c5), 'crate on K8');
-B.mark('main', P(k9, 0, 1.4), 'K9 (ledge up to deck 2)');
+B.mark('main', P(k9, 0, -1.8), 'K9 (ledge up to deck 2)'); // south of K25: the way onto deck 2 is beside that stack
 
 // =====================================================================================
 // ZONE 2 – STEEL BALANCE (345–370, west half): wide beam, long narrow beams, narrow beams with jumps
 // =====================================================================================
 const D2 = deck('deck 2', HALF.W.x0, HALF.W.x1, Z0, Z1, Y2, 'NSW', { gaps: [['E', -16, -4]] });
-const D2in = [r2(HALF.W.x1 - 1.0), Y2, -10.6];
+const D2in = [r2(HALF.W.x1 - 1.0), Y2, -12.6]; // between the K25 stack and the step crate (K25 stands on the deck edge further north)
 B.mark('main', D2in, 'deck 2');
 // level 1: the wide, short beam on legs (on the deck)
 const c20 = crate(-61.4, -15.0, Y2, 90); B.mark('main', P(c20), 'step crate'); void c20;

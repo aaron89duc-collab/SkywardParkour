@@ -1540,10 +1540,18 @@ export class Player {
     if (!up) return null;
     const col = up.collider;
     if (up.distance < 1e-4) return col; // inside a solid primitive
+    let far = up.distance > 3.5;
     for (let k = 0; k < 8; k++) {
       const a = (k / 8) * Math.PI * 2 + 0.2;
       const h = ph.raycast(c, _dir.set(Math.sin(a), 0, Math.cos(a)), 30);
       if (!h || h.collider.handle !== col.handle) return null;
+      if (h.distance > 6) far = true;
+    }
+    // boxed in by one model on every side, roof and floor close (a hollow container, a Meshy shell with a gap in its
+    // collision mesh): inside, even when the shell is not closed and the parity vote below cannot tell
+    if (!far) {
+      const down = ph.raycast(c, DOWN, 2.5);
+      if (down && down.collider.handle === col.handle) return col;
     }
     // parity vote: an odd number of shell crossings toward the outside means we are inside
     let votes = 0;

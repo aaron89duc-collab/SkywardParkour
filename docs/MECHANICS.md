@@ -98,6 +98,9 @@ piece. Rotation rules keep maps fresh:
   the next map's height band (`devtools/out/freefall.cjs`: a fall from 650 m lands in the village after ~17 s, Map 001
   in the world ~9 s before).
 - Moving objects run in their own height band or lane; the clearance check must report 0 hits.
+- Stackable props collide as closed boxes (`devtools/pipeline/boxcol.mjs`; Map 003's containers): a Meshy shell
+  has seams to climb and gaps to slip into. Anyone who still ends up inside a model (boxed in by it on every side) is
+  put back outside within a second (`Player.insideCollider` / `escapeFrom`, test: `devtools/out/stucktest.cjs`).
 - A lip on a wall (stacked containers, sills) is no footing: the player slides off it and cannot jump from it, so
   spamming jump never walks up a wall (`src/player/Player.ts` lipWallNormal, `devtools/out/climbprobe.cjs`).
 - The exit gate opens only when the next map is in the world.
@@ -136,3 +139,14 @@ The game is English by default with Vietnamese (Settings → Language, kept on t
 `src/i18n.ts`. Map content keeps its Vietnamese base text and adds English siblings: zone `name_en`,
 `finishHint_en`, sign `m_en`, pack `summary_en` (map001's English zone names have `name_vi`). The builders add them
 through `devtools/i18n-content.mjs`; `node devtools/i18n-content.mjs` patches existing map files in place.
+
+## 8. Graphics and smoothness
+- Low: no shadow map (the player keeps a blob shadow), 1× resolution, short LOD distance. Medium: 1024 shadow map,
+  1.25× resolution. High: 2048 shadows, 2× resolution, glow (bloom).
+- The glow pass cleans NaN / infinite pixels first (one broken normal used to turn the whole screen black), uses
+  multisampling only where the GPU supports it for half floats, and switches itself off for good (remembered on the
+  device, with a message) if frames still come out black.
+- Map streaming never blocks for long: prefab collision meshes and kit colliders are built in slices
+  (`src/core/Budget.ts` breathe()), new shaders compile with `compileAsync`. Dynamic resolution changes at most once
+  every 6 s (each change re-allocates the frame buffers). `devtools/out/perfprobe.cjs` prints draw calls, triangles
+  and long tasks; `devtools/out/qualityshot.cjs` checks every preset renders (no black frames).
