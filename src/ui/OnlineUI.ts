@@ -141,7 +141,7 @@ export class OnlineUI {
     const shell = (body: string, foot: string) => {
       this.lbBox.innerHTML = `<div class="panel lb-panel"><h2>${t('lb.title')}</h2>
         <div class="seg lb-tabs lb-modes"><button data-md="c" class="${this.lbMode === 'c' ? 'on' : ''}">${t('lb.challenge')}</button><button data-md="a" class="${this.lbMode === 'a' ? 'on' : ''}">${t('lb.adventure')}</button></div>
-        <div class="seg lb-tabs">${tabs.map((tb) => `<button data-t="${tb.id}" class="${tb.id === this.lbTab ? 'on' : ''}">${esc(tb.label)}</button>`).join('')}</div>
+        ${tabs.length < 2 ? '' : `<div class="seg lb-tabs">${tabs.map((tb) => `<button data-t="${tb.id}" class="${tb.id === this.lbTab ? 'on' : ''}">${esc(tb.label)}</button>`).join('')}</div>`}
         <div class="lb-body">${body}</div><div class="lb-foot">${foot}</div>
         <div class="row" style="margin-top:12px"><button class="btn secondary" data-a="name">${t('lb.name', { name: esc(me?.name ?? '—') })}${me?.tag ? ` #${me.tag}` : ''}</button><button class="btn" data-a="close">${t('common.done')}</button></div></div>`;
       this.lbBox.querySelectorAll<HTMLButtonElement>('[data-t]').forEach((b) => b.addEventListener('click', () => { this.h.click(); this.lbTab = b.dataset.t!; void this.renderLb(); }));

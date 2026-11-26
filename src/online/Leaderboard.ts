@@ -5,7 +5,7 @@ import { writeSave } from '../systems/Score';
  * Online leaderboard, offline-first.
  *  - The name is set on the device (no account, no network needed). A random id + secret token identify the
  *    device to the server (Cloudflare Worker + D1, see server/).
- *  - What is sent is the player's best results (best height ever, best full-climb time per map). Playing offline
+ *  - What is sent is the player's best height in each mode (Adventure, Challenge). Playing offline
  *    just leaves them unsent; they go out the next time the game is online (menu, end of a map, 'online' event).
  *  - Boards are cached on the device and shown (marked as such) while offline.
  *  - Nothing here ever blocks or slows the game: short timeouts, errors are swallowed.
@@ -61,20 +61,13 @@ export class Leaderboard {
     return true;
   }
 
-  /** what would be sent now: Adventure (a) and Challenge (c) records; full-climb times only */
+  /** what would be sent now: best height in Adventure (a) and Challenge (c) */
   private payload() {
     const p = this.save.profile!;
-    const r2 = (v: number) => Math.round(v * 100) / 100;
-    const at: Record<string, number> = {};
-    for (const [k, v] of Object.entries(this.save.bestTimes ?? {})) if (v && v > 0) at[k] = r2(v);
-    if (this.save.bestTime && !at[this.firstMapId()]) at[this.firstMapId()] = r2(this.save.bestTime);
-    const ch = this.save.challenge;
-    const ct: Record<string, number> = {};
-    for (const [k, v] of Object.entries(ch?.bestTimes ?? {})) if (v && v > 0) ct[k] = r2(v);
     return {
       id: p.id, token: p.token, name: p.name, app: 1,
-      a: { height: Math.round(this.save.personalBest * 10) / 10, times: at },
-      c: { height: Math.round((ch?.best ?? 0) * 10) / 10, times: ct },
+      a: { height: Math.round(this.save.personalBest * 10) / 10 },
+      c: { height: Math.round((this.save.challenge?.best ?? 0) * 10) / 10 },
     };
   }
 
@@ -116,9 +109,9 @@ export class Leaderboard {
     } finally { this.busy = false; }
   }
 
-  /** A board ("c|height", "a|time:map002" ...), from the server when online, else the copy saved last time. */
+  /** A height board ("a|height" or "c|height"), from the server when online, else the copy saved last time. */
   async board(id: string, limit = 50): Promise<BoardResult | null> {
-    const [mode, b] = id.includes('|') ? id.split('|') : ['a', id];
+    const mode = id.startsWith('c') ? 'c' : 'a';
     const key = CACHE_KEY + id;
     const cached = (): BoardResult | null => {
       try { const c = JSON.parse(localStorage.getItem(key) ?? 'null'); return c ? { ...c, cached: true } : null; } catch { return null; }
@@ -128,7 +121,7 @@ export class Leaderboard {
     try {
       await this.sync();
       const me = this.save.profile?.id ? `&me=${encodeURIComponent(this.save.profile.id)}` : '';
-      const r = await withTimeout(`${API_URL}/v1/board?b=${encodeURIComponent(b)}&m=${mode === 'c' ? 'c' : 'a'}&limit=${limit}${me}`);
+      const r = await withTimeout(`${API_URL}/v1/board?m=${mode === 'c' ? 'c' : 'a'}&limit=${limit}${me}`);
       if (!r.ok) throw new Error(String(r.status));
       const data = (await r.json()) as Board;
       this.online = true;

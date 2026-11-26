@@ -654,7 +654,7 @@ export class Game {
       }),
       lbEnabled: () => this.lb.enabled,
       board: (b: string) => this.lb.board(b),
-      boards: () => [{ id: 'height', label: t('lb.height') }, ...this.content.statuses().map((s) => ({ id: `time:${s.id}`, label: s.name }))],
+      boards: () => [{ id: 'height', label: t('lb.height') }],
       profile: () => this.lb.profile,
       setName: (n: string) => this.lb.setName(n),
       click: () => this.audio.click(),

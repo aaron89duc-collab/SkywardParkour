@@ -16,13 +16,3 @@ CREATE TABLE IF NOT EXISTS players (
 );
 CREATE INDEX IF NOT EXISTS players_height ON players (best_height DESC, height_at ASC);
 CREATE INDEX IF NOT EXISTS players_height_c ON players (best_height_c DESC, height_at_c ASC);
-
-CREATE TABLE IF NOT EXISTS times (
-  player_id TEXT NOT NULL,
-  mode      TEXT NOT NULL,                 -- 'a' Adventure, 'c' Challenge
-  map_id    TEXT NOT NULL,
-  seconds   REAL NOT NULL,                 -- full climb from 0 m to this map's exit
-  at        INTEGER NOT NULL,
-  PRIMARY KEY (player_id, mode, map_id)
-);
-CREATE INDEX IF NOT EXISTS times_board ON times (mode, map_id, seconds ASC, at ASC);
