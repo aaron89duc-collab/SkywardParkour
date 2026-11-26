@@ -294,7 +294,7 @@ export class MoverSystem {
         const o = mesh(src, s, (M.off?.[1] ?? 0) * s, ((M.yaw ?? 0) * Math.PI) / 180);
         if (o) { o.position.x = (M.off?.[0] ?? 0) * s; o.position.z = (M.off?.[2] ?? 0) * s; inner.add(o); }
         for (const [cx, cy, cz, hx, hy, hz] of M.boxes) addBox(new THREE.Vector3(hx * s, hy * s, hz * s), new THREE.Vector3(cx * s, cy * s, cz * s));
-        if (d.kind === 'swing') { m.setRopeTop(new THREE.Vector3(...(d.pivot ?? d.pts[0]))); cable(m, 0.06); }
+        if (d.kind === 'swing') { m.setRopeTop(new THREE.Vector3(...(d.pivot ?? d.pts[0]))); if (d.rope !== false) cable(m, 0.06); }
       } else if (d.kind === 'crane') {
         const S = d.s ?? 3.6, T = 0.4;
         const pal = new THREE.Mesh(new THREE.BoxGeometry(S, T, S), [metal, metal, hazard, metal, metal, metal]);

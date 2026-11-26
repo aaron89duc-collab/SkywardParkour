@@ -83,6 +83,8 @@ export interface MoverData {
   len?: number;
   amp?: number;
   period?: number;
+  /** swing (app 4+): false = no hoist cable drawn (the model brings its own vines / ropes); older apps draw it */
+  rope?: boolean;
   // rotor
   center?: V3;
   arm?: number; // rotor: distance of the reference stand point from the axis (along the jib)

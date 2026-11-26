@@ -27,18 +27,18 @@ Every device is checked by `devtools/devices.cjs` (20/20) with the real player c
 | 5 | `speed-ring` | fly through a hoop, get boosted | `s`, `v` |
 | 6 | `mover:crane` | ride a load along a path | `pts`, `speed`, `wait` |
 | 7 | `mover:hover` | ride a platform (looks: hover, pallet, lift car, trolley); hang from its edge and ride | `pts`, `speed`, `wait`, `phase` |
-| 8 | `mover:swing` | ride a pendulum container, leap at the extremes | `len`, `amp`, `period`, `phase` |
+| 8 | `mover:swing` | ride a pendulum container, leap at the extremes | `len`, `amp`, `period`, `phase`; app 4+: `rope: false` (the model brings its own vines: a swinging log bridge) |
 | 9 | `mover:rotor` | ride a turning arm (crane jib) | `a0`, `a1`, `speed`, `wait` |
 | 10 | `crumble` | platform shakes when you land and drops after `delay` s, comes back after `respawn` s | `delay`, `respawn` |
 | 11 | `blink` | platform solid for `on` s, gone for `off` s (flickers 0.5 s before) | `on`, `off`, `phase` |
 | 12 | `conveyor` | the floor carries you along its length | `speed` (m/s, local +z) |
 | 13 | `turntable` | spinning disc: carries and turns you | `radius`, `speed` (deg/s) |
-| 14 | `tilt` | deck leans towards the end you stand on, springs back | `maxAngle` |
+| 14 | `tilt` | deck leans towards the end you stand on, springs back | `maxAngle`; app 4+: `fold` (s: a folding leaf bends its +z end down after you stand this long), `sway` (s: sways by itself, a leaf in the wind) |
 | 15 | `piston` | block slides out of a wall on a cycle and shoves you; ride on top | `stroke`, `period`, `wait`, `phase` |
 | 16 | `sweeper` | rotating bar at shin height knocks you off: jump it | `radius`, `speed`, `arms` |
 | 17 | `fan` | updraft (or `dir: forward` wind) lifts / pushes you | `s` (stream size), `force`, `on`/`off` |
 | 18 | `slippery` | ice: almost no grip, long slides | `grip` |
-| 19 | `trampoline` | bounces you back up with most of your landing speed | `bounce`, `min`, `max` |
+| 19 | `trampoline` | bounces you back up with most of your landing speed; the look squashes and wobbles (app 4+) | `bounce`, `min`, `max`; app 4+: `push` (m/s sideways along the yaw: a tilted mushroom cap) |
 | 20 | `zipline` | jump into the cable → slide down it; jump to let go | `p` → `b`, `speed` |
 | 21 | `plate` | stand on it → its `target` piston slides out / elevator comes | `target`, `hold` |
 | 22 | `elevator` | waits until you step on, rides to `b`, waits, comes back | `b`, `speed`, `wait` |

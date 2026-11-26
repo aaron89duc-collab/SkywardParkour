@@ -40,11 +40,19 @@ export interface DeviceData {
   speed?: number; // conveyor (m/s), turntable / sweeper (deg/s), elevator / zipline (m/s), drop (m/s)
   radius?: number; // turntable, sweeper arm length
   maxAngle?: number; // tilt
+  /** tilt (app 4+): a folding leaf - after the player has stood on it this many seconds it bends its local +z end
+   *  down to maxAngle, slowly, and springs back once empty; older apps: a plain tilt */
+  fold?: number;
+  /** tilt (app 4+): sways by itself (wind), +-maxAngle over this period in seconds; standing on it adds a lean */
+  sway?: number;
   stroke?: number; period?: number; wait?: number; // piston, elevator wait
   arms?: number; // sweeper
   force?: number; dir?: 'up' | 'forward'; // fan
   grip?: number; // slippery (0..1)
   bounce?: number; min?: number; max?: number; // trampoline
+  /** trampoline (app 4+): also throws you sideways at this speed (m/s) along the device's yaw (local +z): a tilted
+   *  mushroom cap. Older apps: straight up */
+  push?: number;
   b?: V3; // zipline end, elevator top, portal exit
   rb?: number; // portal exit yaw
   target?: string; hold?: number; // plate -> device id it drives (piston / elevator), seconds it stays on
@@ -63,7 +71,7 @@ export interface Carrier {
   carryAt(p: THREE.Vector3, out?: THREE.Vector3): THREE.Vector3;
   velAt(p: THREE.Vector3, dt: number, out?: THREE.Vector3): THREE.Vector3;
 }
-export type Surface = { grip?: number; bounce?: number; min?: number; max?: number };
+export type Surface = { grip?: number; bounce?: number; min?: number; max?: number; pushX?: number; pushZ?: number };
 export type DeviceAction =
   | { kind: 'portal'; p: THREE.Vector3; yaw: number; dYaw: number }
   | { kind: 'launch'; v: THREE.Vector3 }
@@ -95,6 +103,10 @@ class Device implements Carrier {
   stoodNow = false;
   /** internal state machine */
   st = 0; stT = 0;
+  /** the look (squashed when a trampoline throws you) */
+  inner: THREE.Group | null = null;
+  squash = -1;
+  wasStood = false;
   active = true;
   constructor(public d: DeviceData, public data: { id: string }) {
     this.base.set(...d.p);
@@ -159,6 +171,7 @@ export class DeviceSystem {
       const [w, h, dd] = d.s ?? [3, 0.5, 3];
       const inner = new THREE.Group();
       dv.group.add(inner);
+      dv.inner = inner;
       const solid = (half: THREE.Vector3, off = new THREE.Vector3(), sensor = false) => {
         const desc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z).setCollisionGroups(COLLISION.WORLD).setFriction(0);
         if (sensor) desc.setSensor(true);
@@ -347,7 +360,10 @@ export class DeviceSystem {
     const dv = c ? this.byHandle.get(c.handle) : undefined;
     if (!dv) return null;
     if (dv.d.t === 'slippery') return { grip: dv.d.grip ?? 0.12 };
-    if (dv.d.t === 'trampoline') return { bounce: dv.d.bounce ?? 0.9, min: dv.d.min ?? 11, max: dv.d.max ?? 24 };
+    if (dv.d.t === 'trampoline') {
+      const pu = dv.d.push ?? 0, r = (dv.d.r ?? 0) * D2R;
+      return { bounce: dv.d.bounce ?? 0.9, min: dv.d.min ?? 11, max: dv.d.max ?? 24, ...(pu ? { pushX: Math.sin(r) * pu, pushZ: Math.cos(r) * pu } : {}) };
+    }
     return null;
   }
 
@@ -498,6 +514,20 @@ export class DeviceSystem {
       const prevAng = dv.ang;
       const stood = dv.stoodNow;
       dv.stoodNow = false;
+      if (d.t === 'trampoline' && dv.inner) {
+        // the cap squashes when it throws you, then wobbles back (look only, the collider stays put)
+        if (stood && !dv.wasStood) dv.squash = 0;
+        dv.wasStood = stood;
+        if (dv.squash >= 0) {
+          dv.squash += dt;
+          const u = dv.squash, H = d.s?.[1] ?? 0.5;
+          const k = u < 0.07 ? 1 - 0.28 * (u / 0.07) : u < 0.7 ? 1 + 0.16 * Math.exp(-(u - 0.07) * 6) * Math.sin((u - 0.07) * 24) - 0.28 * Math.max(0, 1 - (u - 0.07) / 0.06) : 1;
+          const wk = 1 / Math.sqrt(Math.max(0.5, k));
+          dv.inner.scale.set(wk, k, wk);
+          dv.inner.position.y = -H * (1 - k);
+          if (u >= 0.7) { dv.squash = -1; dv.inner.scale.set(1, 1, 1); dv.inner.position.y = 0; }
+        }
+      }
       dv.stoodT = stood ? dv.stoodT + dt : 0;
       switch (d.t) {
         case 'crumble': {
@@ -542,8 +572,10 @@ export class DeviceSystem {
           const max = (d.maxAngle ?? 14) * D2R;
           const st = dv as unknown as { tilt: number; side: number; tiltQ: THREE.Quaternion };
           st.tilt ??= 0;
-          const target = stood ? Math.sign(st.side || 1) * max : 0;
-          st.tilt += THREE.MathUtils.clamp(target - st.tilt, -1.2 * dt, 1.2 * dt);
+          let target = stood ? Math.sign(st.side || 1) * max : 0, rate = 1.2;
+          if (d.sway) { target = max * Math.sin((2 * Math.PI * (t + (d.phase ?? 0))) / d.sway) + (stood ? Math.sign(st.side || 1) * max * 0.4 : 0); rate = 2.5; }
+          else if (d.fold) { target = stood && dv.stoodT > d.fold ? max : 0; rate = stood ? 0.6 : 1.0; }
+          st.tilt += THREE.MathUtils.clamp(target - st.tilt, -rate * dt, rate * dt);
           st.tiltQ = _q.clone().setFromAxisAngle(new THREE.Vector3(1, 0, 0), st.tilt);
           dv.group.quaternion.copy(dv.q).multiply(st.tiltQ);
           this.place(dv);

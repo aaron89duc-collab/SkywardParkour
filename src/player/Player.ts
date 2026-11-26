@@ -893,6 +893,12 @@ export class Player {
   private bounceOff(surf: Surface, fallSpeed: number) {
     const v = THREE.MathUtils.clamp(fallSpeed * (surf.bounce ?? 0.9), surf.min ?? 11, surf.max ?? 24);
     this.vel.y = v;
+    if (surf.pushX || surf.pushZ) {
+      // a tilted cap: thrown along its slope, momentum kept in the air (steering as after a launch)
+      this.vel.x = surf.pushX ?? 0; this.vel.z = surf.pushZ ?? 0;
+      this.yaw = Math.atan2(this.vel.x, this.vel.z);
+      this.padFlight = { maxSpeed: Math.max(PHYS.runSpeed, Math.hypot(this.vel.x, this.vel.z) * 1.1), t: 0 };
+    }
     this.state = 'air';
     this.grounded = false;
     this.jumping = false;

@@ -41,6 +41,15 @@ export const I18N = {
     },
     summary: 'A giant world of toys · 720 → 935 m · 7 zones · teddy, robots, toy trains, race cars, spinning tops, seesaws, a rocking horse, a toy cannon and secret ways',
   },
+  map006: {
+    zones: { A: 'Forest Entrance', B: 'Mushroom Valley', C: 'Giant Leaf Garden', D: 'Hanging Log Canyon', E: 'Hollow Ancient Tree', F: 'Glowing Spore Sanctuary', G: 'Ancient Tree Crown' },
+    finishHint: 'Hint: the Mushroom Forest has its own rules – red caps bounce you straight up, orange caps throw you the way they lean, violet caps throw you high; glowing mushrooms mark where to land, and look behind the trunk…',
+    signs: {
+      'MUSHROOM FOREST|Rừng nấm khổng lồ · 935 → 1150 m': 'MUSHROOM FOREST|A giant mushroom forest · 935 → 1150 m',
+      'CỔNG ĐÁ QUÝ|Cần 5 viên đá quý · bay lên gần vương miện': 'GEM PORTAL|Needs 5 gems · flies you up near the crown',
+    },
+    summary: 'A giant mushroom forest round one ancient tree · 935 → 1150 m · 7 zones · bouncing and leaning caps, folding leaves, swinging log bridges, vines, spore streams and secret ways inside the tree',
+  },
 };
 
 /** adds the `_en` (and for map001's English zone names, `_vi`) fields to a map's data; returns it */
@@ -65,7 +74,7 @@ export function applyPackI18n(id, meta) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const ROOT = new URL('../', import.meta.url).pathname;
-  const files = { map001: 'public/maps/map001.json', map002: 'packs/map002/maps/map002.json', map003: 'packs/map003/maps/map003.json', map004: 'packs/map004/maps/map004.json', map005: 'packs/map005/maps/map005.json' };
+  const files = { map001: 'public/maps/map001.json', map002: 'packs/map002/maps/map002.json', map003: 'packs/map003/maps/map003.json', map004: 'packs/map004/maps/map004.json', map005: 'packs/map005/maps/map005.json', map006: 'packs/map006/maps/map006.json' };
   for (const [id, f] of Object.entries(files)) {
     const p = ROOT + f;
     if (!fs.existsSync(p)) continue;

@@ -11,8 +11,8 @@ const sharp = require('sharp');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 200000 });
   const spots = JSON.parse(process.argv[2] || '[[-51.4,520,0.9],[0,2,10],[-59,600,0.4]]');
   const quals = (process.argv[3] || 'low,medium,high').split(',');
-  await page.evaluate(async () => { const g = window.__game; g.renderer.setAnimationLoop(null); await g.loadOtherMaps('map004'); g.ui.hideMenu(); g.state = 'playing';
-    for (const el of document.body.querySelectorAll('*')) { const st = getComputedStyle(el); if ((st.position === 'fixed' || st.position === 'absolute') && el.tagName !== 'CANVAS' && !el.querySelector('canvas')) el.style.display = 'none'; } });
+  await page.evaluate(async (MAPQ) => { const g = window.__game; g.renderer.setAnimationLoop(null); await g.loadOtherMaps(MAPQ); g.ui.hideMenu(); g.state = 'playing';
+    for (const el of document.body.querySelectorAll('*')) { const st = getComputedStyle(el); if ((st.position === 'fixed' || st.position === 'absolute') && el.tagName !== 'CANVAS' && !el.querySelector('canvas')) el.style.display = 'none'; } }, process.env.MAPQ || 'map004');
   for (const q of quals) {
     for (const [i, s] of spots.entries()) {
       await page.evaluate(async ([q, s]) => {
