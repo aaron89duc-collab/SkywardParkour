@@ -13,7 +13,7 @@ database_name = "skyward"
 database_id = "00000000-0000-0000-0000-000000000000"
 
 [vars]
-# heights above this are rejected (top of the highest published map + margin)
-MAX_HEIGHT = "400"
+# heights above this are rejected (top of the highest published map + margin: Map 007 ends at 1390 m)
+MAX_HEIGHT = "1500"
 # a map cannot honestly be finished faster than this (seconds)
 MIN_MAP_SECONDS = "30"

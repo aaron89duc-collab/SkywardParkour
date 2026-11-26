@@ -84,7 +84,7 @@ async function submit(req: Request, env: Env) {
   if (!ID_RE.test(id) || !TOKEN_RE.test(token)) return json({ error: 'bad identity' }, 400);
   const name = cleanName(body.name);
   if (!name) return json({ error: 'bad name' }, 400);
-  const maxH = Number(env.MAX_HEIGHT ?? 400);
+  const maxH = Number(env.MAX_HEIGHT ?? 1500);
   const minT = Number(env.MIN_MAP_SECONDS ?? 30);
   // older clients sent { height, times } at the top level: that is Adventure
   const a = readPart(body.a ?? { height: body.height, times: body.times }, maxH, minT);
