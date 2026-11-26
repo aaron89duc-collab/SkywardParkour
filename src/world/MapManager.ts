@@ -208,6 +208,7 @@ export class MapManager {
     await devices.build(data.devices ?? [], this.assets);
     group.add(devices.group);
     if (this.collected) devices.markCollected([...this.collected].filter((k) => k.startsWith(entry.id + ':')).map((k) => k.slice(entry.id.length + 1)));
+    if (this.latched) devices.markLatched([...this.latched].filter((k) => k.startsWith(entry.id + ':')).map((k) => k.slice(entry.id.length + 1)));
 
     this.root.add(group);
     this.loaded.set(entry.id, { entry, data, group, prefabs, sprites, movers, boosters, devices });
@@ -219,6 +220,15 @@ export class MapManager {
   // ---- dynamic world features across all loaded maps (Player.hooks)
   /** pickups collected in earlier sessions (ids): a map loaded later hides them */
   collected: Iterable<string> | null = null;
+  /** plates / plate puzzles latched in earlier sessions (map-qualified ids): what they open is already there */
+  latched: Iterable<string> | null = null;
+  /** plate events of every loaded map since the last call (sounds; a latch is saved, map-qualified) */
+  drainDeviceEvents() {
+    const out: { map: string; e: import('./Devices').DeviceEvent }[] = [];
+    for (const [id, m] of this.loaded) for (const e of m.devices.drainEvents()) out.push({ map: id, e });
+    for (const d of this.extraDevices) for (const e of d.drainEvents()) out.push({ map: '__devices', e });
+    return out;
+  }
   /** the player (one-way platforms need to know where the feet are) */
   playerFeet: (() => { y: number; rising: boolean }) | null = null;
   /** device systems outside any map (test bench, admin sandbox) */
@@ -234,7 +244,7 @@ export class MapManager {
   }
   surfaceOf(c: RAPIER.Collider | null | undefined): Surface | null { for (const d of this.devs()) { const r = d.surfaceOf(c); if (r) return r; } return null; }
   stood(c: RAPIER.Collider | null | undefined, p: THREE.Vector3) { for (const d of this.devs()) d.stood(c, p); }
-  field(p: THREE.Vector3, out: { g: number; acc: THREE.Vector3 }) { for (const d of this.devs()) d.field(p, out); }
+  field(p: THREE.Vector3, out: { g: number; acc: THREE.Vector3; soft?: { speed: number; jump: number } | null }) { for (const d of this.devs()) d.field(p, out); }
   push(p: THREE.Vector3, out: { d: THREE.Vector3; v: THREE.Vector3 }) { let h = false; for (const d of this.devs()) if (d.push(p, out)) h = true; return h; }
   touch(p: THREE.Vector3, vel: THREE.Vector3, airborne: boolean): DeviceAction | null { for (const d of this.devs()) { const r = d.touch(p, vel, airborne); if (r) return r; } return null; }
   moverOf(c: RAPIER.Collider | null | undefined): Carrier | null {
@@ -253,6 +263,8 @@ export class MapManager {
     return null;
   }
   ladders() { return this.ladderList; }
+
+  fanDistance(p: THREE.Vector3) { let d = Infinity; for (const s of this.devs()) d = Math.min(d, s.fanDistance(p)); return d; }
 
   stepMovers(t: number, dt: number) {
     const f = this.playerFeet?.() ?? { y: -1e9, rising: false };

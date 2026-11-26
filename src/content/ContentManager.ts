@@ -26,7 +26,7 @@ import { t, loc } from '../i18n';
  * The game keeps using the same logical paths (maps/map002.json, assets/map002/x.glb): installed packs are
  * mounted under them and served from storage as blob: URLs.
  */
-export const APP_CONTENT_VERSION = 4; // 2: swinging / turning movers, map pad models (Map 003); 3: gameplay devices; 4: tilted / squashing bounce caps, folding and swaying tilts, rope-less swings (Map 006)
+export const APP_CONTENT_VERSION = 5; // 2: swinging / turning movers, map pad models (Map 003); 3: gameplay devices; 4: tilted / squashing bounce caps, folding and swaying tilts, rope-less swings (Map 006); 5: slides, ball pits, latched plates and plate puzzles, reveals, swing kick and tilted swing seats (Map 007)
 
 const BASE = import.meta.env.BASE_URL;
 const ENV_URL = (import.meta.env.VITE_CONTENT_URL as string | undefined)?.trim();

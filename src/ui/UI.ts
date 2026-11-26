@@ -27,6 +27,7 @@ export type UIHandlers = {
   onMainMenu: () => void;
   onCharacter: (c: 'male' | 'female') => void;
   onVolume: (v: number) => void;
+  onMusic: (v: number) => void;
   onQuality: (q: Quality) => void;
   onSensitivity: (v: number) => void;
   onShowFps: (v: boolean) => void;
@@ -406,6 +407,7 @@ export class UI {
     this.settings.innerHTML = `<div class="panel"><h2>${t('set.title')}</h2>
       <div class="set-row"><span>${t('set.language')}</span><div class="seg" data-k="lang">${LANGS.map((l) => `<button data-v="${l.id}" class="${l.id === L ? 'on' : ''}">${l.label}</button>`).join('')}</div></div>
       <div class="set-row"><span>${t('set.volume')}</span><input type="range" min="0" max="1" step="0.05" value="${s.volume}" data-k="vol"></div>
+      <div class="set-row"><span>${t('set.music')}</span><input type="range" min="0" max="1" step="0.05" value="${s.music ?? 0.6}" data-k="music"></div>
       <div class="set-row"><span>${t('set.graphics')}</span><div class="seg" data-k="q">
         <button data-v="low" class="${q === 'low' ? 'on' : ''}">${t('set.low')}</button><button data-v="medium" class="${q === 'medium' ? 'on' : ''}">${t('set.medium')}</button><button data-v="high" class="${q === 'high' ? 'on' : ''}">${t('set.high')}</button></div></div>
       <div class="set-row"><span>${t('set.sens')}</span><input type="range" min="0.4" max="2" step="0.1" value="${s.sensitivity}" data-k="sens"></div>
@@ -414,6 +416,7 @@ export class UI {
       <div class="note">${t('set.signsNote')}</div>
       <div class="stack" style="margin-top:14px"><button class="btn" data-a="back">${t('common.done')}</button></div></div>`;
     (this.settings.querySelector('[data-k=vol]') as HTMLInputElement).addEventListener('input', (e) => this.h.onVolume(parseFloat((e.target as HTMLInputElement).value)));
+    (this.settings.querySelector('[data-k=music]') as HTMLInputElement).addEventListener('input', (e) => this.h.onMusic(parseFloat((e.target as HTMLInputElement).value)));
     (this.settings.querySelector('[data-k=sens]') as HTMLInputElement).addEventListener('input', (e) => this.h.onSensitivity(parseFloat((e.target as HTMLInputElement).value)));
     (this.settings.querySelector('[data-k=fps]') as HTMLInputElement).addEventListener('change', (e) => this.h.onShowFps((e.target as HTMLInputElement).checked));
     (this.settings.querySelector('[data-k=autocam]') as HTMLInputElement).addEventListener('change', (e) => this.h.onAutoCam((e.target as HTMLInputElement).checked));

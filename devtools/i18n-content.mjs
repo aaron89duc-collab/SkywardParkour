@@ -50,6 +50,18 @@ export const I18N = {
     },
     summary: 'A giant mushroom forest round one ancient tree · 935 → 1150 m · 7 zones · bouncing and leaning caps, folding leaves, swinging log bridges, vines, spore streams and secret ways inside the tree',
   },
+  map007: {
+    zones: { A: 'Rainbow Gate', B: 'Swing Garden', C: 'Rope Bridges & Seesaw', D: 'Sea of Balls', E: 'Tube Maze', F: 'Slide Hill', G: 'Master Tower' },
+    finishHint: 'Hint: in the Giant Playground, jump off a swing right at the bottom of its swing to fly furthest; the ball pits catch any fall, and remember the order of the three coloured blocks…',
+    signs: {
+      'SÂN CHƠI KHỔNG LỒ|1150 → 1390 m · nhảy, đu, trượt và leo': 'GIANT PLAYGROUND|1150 → 1390 m · jump, swing, slide and climb',
+      'DƯỚI → TRÊN|Bấm ba nút theo thứ tự màu': 'BOTTOM → TOP|Press the three buttons in colour order',
+      'THÁP CHỦ|Cầu thang vòng quanh · lên tới 1390 m': 'MASTER TOWER|Stairs all the way round · up to 1390 m',
+      'ĐỈNH SÂN CHƠI|1390 m · trượt xuống cho vui!': 'PLAYGROUND SUMMIT|1390 m · slide down for fun!',
+      'CỔNG ĐÁ QUÝ|Cần 5 viên đá quý · bay lên đảo vương miện': 'GEM PORTAL|Needs 5 gems · flies you up to the crown island',
+    },
+    summary: 'A giant playground above the clouds · 1150 → 1390 m · 7 zones · soft blocks, play towers, swings, seesaws, rope bridges, ball pits, crawl tubes, slides, a drawbridge and a three-button puzzle',
+  },
 };
 
 /** adds the `_en` (and for map001's English zone names, `_vi`) fields to a map's data; returns it */
@@ -74,7 +86,7 @@ export function applyPackI18n(id, meta) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const ROOT = new URL('../', import.meta.url).pathname;
-  const files = { map001: 'public/maps/map001.json', map002: 'packs/map002/maps/map002.json', map003: 'packs/map003/maps/map003.json', map004: 'packs/map004/maps/map004.json', map005: 'packs/map005/maps/map005.json', map006: 'packs/map006/maps/map006.json' };
+  const files = { map001: 'public/maps/map001.json', map002: 'packs/map002/maps/map002.json', map003: 'packs/map003/maps/map003.json', map004: 'packs/map004/maps/map004.json', map005: 'packs/map005/maps/map005.json', map006: 'packs/map006/maps/map006.json', map007: 'packs/map007/maps/map007.json' };
   for (const [id, f] of Object.entries(files)) {
     const p = ROOT + f;
     if (!fs.existsSync(p)) continue;

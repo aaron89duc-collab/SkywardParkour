@@ -106,6 +106,7 @@ export class Game {
       onMainMenu: () => this.toMenu(),
       onCharacter: (c) => void this.setCharacter(c),
       onVolume: (v) => { this.save.settings.volume = v; this.audio.setVolume(v); writeSave(this.save); },
+      onMusic: (v) => { this.save.settings.music = v; this.audio.setMusic(v); writeSave(this.save); },
       onQuality: (q) => { this.applyQuality(q); this.save.settings.quality = q; writeSave(this.save); },
       onSensitivity: (v) => { this.sensitivity = v; this.save.settings.sensitivity = v; writeSave(this.save); },
       onShowFps: (v) => { this.save.settings.showFps = v; writeSave(this.save); },
@@ -164,6 +165,7 @@ export class Game {
     this.player.hooks = this.maps;
     this.maps.playerFeet = () => ({ y: this.player.feetY, rising: this.player.vel.y > 0.5 });
     this.maps.collected = this.save.collected ?? [];
+    this.maps.latched = this.save.latched ?? [];
     this.player.spawnPoint.set(...this.map.spawn.p);
     this.player.spawnYaw = this.map.spawn.yaw;
     this.ui.setLoading(0.9, t('load.character'));
@@ -547,6 +549,7 @@ export class Game {
     if (this.isTouch && fullscreenSupported() && !isFullscreen()) enterFullscreen();
     this.audio.init();
     this.audio.setVolume(this.save.settings.volume);
+    this.audio.setMusic(this.save.settings.music ?? 0.6);
     this.ui.hideMenu();
     if (!this.maps.map(mapId)) {
       this.ui.showLoading(t('load.build', { name: this.maps.entry(mapId)?.name ?? t('load.map') }));
@@ -815,6 +818,17 @@ export class Game {
     this.clouds.update(dt, this.time, this.cam.camera.position, this.env.sunTint);
     this.fx.update(dt, this.time);
     this.maps.update(this.time, this.cam.camera.position, this.env.sunTint, dt);
+    this.audio.setMap(this.map?.id, this.map?.audio);
+    if (this.state === 'playing') {
+      const P = this.player;
+      this.audio.rubbing(P.state === 'zip' ? P.zip?.v ?? 0 : P.state === 'slide' ? P.vel.length() : 0);
+      this.audio.fan(Math.max(0, 1 - this.maps.fanDistance(P.renderPos) / 10));
+      // a swing seat creaks at the top of each swing
+      const sw = P.riding as { data?: { kind?: string }; vel?: THREE.Vector3 } | null;
+      const sv = sw?.data?.kind === 'swing' && sw.vel ? sw.vel.length() : -1;
+      if (sv >= 0 && sv < 0.8 && this.swingV >= 0.8) this.audio.creak();
+      this.swingV = sv;
+    } else { this.audio.rubbing(0); this.audio.fan(0); }
     this.audio.update(dt, this.state === 'playing' ? this.player.feetY : 0, this.state === 'playing' ? -this.player.vel.y : 0, this.time);
 
     if (this.composer) { this.composer.render(dt); this.watchBlackFrames(dt); }
@@ -843,6 +857,7 @@ export class Game {
     this.touch?.setHanging(this.player.isHanging);
 
     for (const e of this.player.drainEvents()) this.onPlayerEvent(e);
+    for (const { map, e } of this.maps.drainDeviceEvents()) this.onDeviceEvent(map, e);
 
     const feet = this.player.renderPos;
     // which map are we in? (seamless world: village below, city beside it above the clouds)
@@ -939,6 +954,24 @@ export class Game {
   private hangTipShown = false;
   private ladderTipShown = false;
 
+  /** plates (app 5): a step in a puzzle, a wrong plate, a shortcut opened for good (saved) */
+  private swingV = -1;
+  private onDeviceEvent(map: string, e: import('../world/Devices').DeviceEvent) {
+    if (e.k === 'crack') { this.audio.crack(); return; }
+    if (e.k === 'press') { this.audio.rise(); this.fx.sparkles.emit(e.p.clone().add(new THREE.Vector3(0, 0.3, 0)), 10, { speed: 1.8, up: 1.5, life: 0.5, size: 0.3 }); this.haptic(10); }
+    else if (e.k === 'bad') { this.audio.clank(); this.haptic(35); }
+    else {
+      const key = `${map}:${e.id}`;
+      const list = (this.save.latched ??= []);
+      if (map !== '__devices' && !list.includes(key)) { list.push(key); writeSave(this.save); }
+      this.maps.latched = list;
+      this.audio.chime();
+      this.fx.sparkles.emit(e.p.clone().add(new THREE.Vector3(0, 0.5, 0)), 26, { speed: 3.5, up: 2, life: 0.8, size: 0.35 });
+      this.haptic(25);
+      this.ui.toast(t('toast.shortcut'), t('toast.shortcutSub'), true, 2400);
+    }
+  }
+
   private onPlayerEvent(e: ReturnType<Player['drainEvents']>[number]) {
     const feet = this.player.renderPos.clone();
     switch (e.type) {
@@ -985,7 +1018,7 @@ export class Game {
       case 'lower': this.audio.climb(); this.showHangTip(); break;
       case 'drop': break;
       case 'step':
-        this.audio.step(e.run);
+        if (this.player.wading) this.audio.balls(); else this.audio.step(e.run);
         if (e.run && Math.random() < 0.35) this.fx.dust.emit(feet, 1, { speed: 0.6, up: 0.2, life: 0.45, size: 0.3 });
         break;
       case 'rescue':
@@ -999,7 +1032,7 @@ export class Game {
         else { this.audio.whoosh(); this.fx.dust.emit(feet, 8, { speed: 2.5, up: 0.4, life: 0.5, size: 0.4 }); this.haptic(12); }
         break;
       case 'launch':
-        this.audio.boing();
+        this.audio.boom();
         this.fx.sparkles.emit(feet.clone().add(new THREE.Vector3(0, 0.3, 0)), 18, { speed: 2.5, up: 6, life: 0.9, size: 0.35 });
         this.haptic(25);
         break;
@@ -1017,6 +1050,9 @@ export class Game {
         this.fx.sparkles.emit(this.player.pos.clone(), 24, { speed: 3, up: 1, life: 0.7, size: 0.35 });
         break;
       case 'zip':
+        this.audio.whoosh();
+        break;
+      case 'slide':
         this.audio.whoosh();
         break;
       case 'checkpoint':

@@ -15,11 +15,14 @@ import type { V3 } from './MapTypes';
  * Device ids (also the `mechanics` ids of the content catalog):
  *   crumble, blink, conveyor, turntable, tilt, piston, sweeper, fan, slippery, trampoline, zipline, plate,
  *   elevator, cannon, drop, portal, lowgrav, oneway, checkpoint, collectible
+ *   app 5+: slide (a playground chute you ride down), pit (soft ball pit), reveal (appears / lowers when a plate
+ *   or a plate puzzle drives it); older apps skip the types they do not know (a map using them sets minApp 5)
  */
 export type DeviceType =
   | 'crumble' | 'blink' | 'conveyor' | 'turntable' | 'tilt' | 'piston' | 'sweeper' | 'fan' | 'slippery' | 'trampoline'
-  | 'zipline' | 'plate' | 'elevator' | 'cannon' | 'drop' | 'portal' | 'lowgrav' | 'oneway' | 'checkpoint' | 'collectible';
-export const DEVICE_TYPES: DeviceType[] = ['crumble', 'blink', 'conveyor', 'turntable', 'tilt', 'piston', 'sweeper', 'fan', 'slippery', 'trampoline', 'zipline', 'plate', 'elevator', 'cannon', 'drop', 'portal', 'lowgrav', 'oneway', 'checkpoint', 'collectible'];
+  | 'zipline' | 'plate' | 'elevator' | 'cannon' | 'drop' | 'portal' | 'lowgrav' | 'oneway' | 'checkpoint' | 'collectible'
+  | 'slide' | 'pit' | 'reveal';
+export const DEVICE_TYPES: DeviceType[] = ['crumble', 'blink', 'conveyor', 'turntable', 'tilt', 'piston', 'sweeper', 'fan', 'slippery', 'trampoline', 'zipline', 'plate', 'elevator', 'cannon', 'drop', 'portal', 'lowgrav', 'oneway', 'checkpoint', 'collectible', 'slide', 'pit', 'reveal'];
 
 /** A device entry in the map JSON. `p` is the top centre of a platform (or the base of a volume), `s` its size
  *  [w, h, d] (local x, y, z), `r` its yaw in degrees. Every other field is a parameter of that type. */
@@ -55,7 +58,26 @@ export interface DeviceData {
   push?: number;
   b?: V3; // zipline end, elevator top, portal exit
   rb?: number; // portal exit yaw
-  target?: string; hold?: number; // plate -> device id it drives (piston / elevator), seconds it stays on
+  target?: string; hold?: number; // plate -> device id (or `grp`) it drives (piston / elevator / reveal), seconds it stays on
+  /** plate (app 5+): stays on for good once pressed, and the game remembers it (a shortcut opened once stays open) */
+  latch?: boolean;
+  /** plate (app 5+): plates sharing a puzzle id must be pressed in `order` (1, 2, 3 ...); a wrong one resets them.
+   *  Solved = latched (saved) and the puzzle's `target` (on any of its plates) turns on */
+  puzzle?: string; order?: number;
+  /** any device (app 5+): a group name a plate's `target` can name (several pieces of stairs, a bridge's planks) */
+  grp?: string;
+  /** slide (app 5+): centre line of the chute's surface from the top to the bottom (world points; p = pts[0]),
+   *  chute width `w`, friction (m/s^2) and top speed. A last segment pointing up throws you off like a ramp */
+  pts?: V3[]; w?: number; fric?: number; vmax?: number;
+  /** any device (app 5+): no built-in look at all (the map places the model as a prefab, e.g. a slide's chute) */
+  bare?: boolean;
+  /** pit (app 5+): p = the ball surface (top centre), s = [w, -, d]; you sink `sink` m into it, run at `slow` of
+   *  the speed and jump `jump` of the height; `rim` = soft walls that high above the balls (0 = none), n loose balls */
+  sink?: number; slow?: number; jump?: number; rim?: number; n?: number;
+  /** reveal (app 5+): hidden (no collider) until driven, then rises from `rise` (offset, default 3 m below) over
+   *  `dur` s after `delay`; with `tip` it is always there, raised `tip` degrees (its +z end up, a drawbridge),
+   *  and lowers flat when driven */
+  rise?: V3; dur?: number; tip?: number;
   pitch?: number; v?: number; // cannon
   need?: number; // portal: opens only once this many pickups (collectible) of the map are collected; older apps: always open
   fall?: number; interval?: number; // drop
@@ -70,14 +92,92 @@ export interface Carrier {
   data: { id: string };
   carryAt(p: THREE.Vector3, out?: THREE.Vector3): THREE.Vector3;
   velAt(p: THREE.Vector3, dt: number, out?: THREE.Vector3): THREE.Vector3;
+  /** app 5: jumping off keeps k x its velocity, the horizontal speed capped at max, and the flight keeps it */
+  kick?: Kick | null;
 }
-export type Surface = { grip?: number; bounce?: number; min?: number; max?: number; pushX?: number; pushZ?: number };
+
+/** The centre line of a slide: arc length s along it, sideways offset lat (+ = right of the way down). */
+export class SlidePath {
+  readonly pts: THREE.Vector3[];
+  readonly cum: number[] = [0];
+  readonly L: number;
+  constructor(pts: V3[], public w: number, public fric: number, public vmax: number, public id: string) {
+    this.pts = pts.map((p) => new THREE.Vector3(...p));
+    let L = 0;
+    for (let i = 1; i < this.pts.length; i++) { L += this.pts[i].distanceTo(this.pts[i - 1]); this.cum.push(L); }
+    this.L = L;
+  }
+  private seg(s: number) {
+    let i = 1;
+    while (i < this.cum.length - 1 && this.cum[i] < s) i++;
+    return i;
+  }
+  private segDir(i: number, out: THREE.Vector3) {
+    i = THREE.MathUtils.clamp(i, 1, this.pts.length - 1);
+    return out.subVectors(this.pts[i], this.pts[i - 1]).normalize();
+  }
+  /** unit tangent at s (blended over 0.6 m around each bend, so the yaw never snaps) */
+  tangent(s: number, out = new THREE.Vector3()) {
+    const i = this.seg(s);
+    this.segDir(i, out);
+    const B = 0.6;
+    const toEnd = this.cum[i] - s, fromStart = s - this.cum[i - 1];
+    if (toEnd < B && i < this.pts.length - 1) out.lerp(this.segDir(i + 1, _sv), 0.5 * (1 - toEnd / B)).normalize();
+    else if (fromStart < B && i > 1) out.lerp(this.segDir(i - 1, _sv), 0.5 * (1 - fromStart / B)).normalize();
+    return out;
+  }
+  /** horizontal unit normal to the right of the way down at s */
+  side(s: number, out = new THREE.Vector3()) {
+    const t = this.tangent(s, out);
+    const h = Math.hypot(t.x, t.z) || 1;
+    return out.set(-t.z / h, 0, t.x / h);
+  }
+  /** surface point at (s, lat) */
+  at(s: number, lat: number, out = new THREE.Vector3()) {
+    s = THREE.MathUtils.clamp(s, 0, this.L);
+    const i = this.seg(s), a = this.pts[i - 1], b = this.pts[i];
+    const sl = this.cum[i] - this.cum[i - 1];
+    out.lerpVectors(a, b, sl > 1e-6 ? (s - this.cum[i - 1]) / sl : 0);
+    return out.addScaledVector(this.side(s, _sv2), lat);
+  }
+  /** nearest centre-line point to p: arc length, sideways offset, height of p above the surface */
+  project(p: THREE.Vector3) {
+    let best = Infinity, bs = 0, bl = 0, bh = 0;
+    for (let i = 1; i < this.pts.length; i++) {
+      const a = this.pts[i - 1], b = this.pts[i];
+      const ab = _sv.subVectors(b, a), L2 = ab.lengthSq();
+      const u = THREE.MathUtils.clamp(_sv2.subVectors(p, a).dot(ab) / Math.max(1e-9, L2), 0, 1);
+      const c = _sv2.copy(a).addScaledVector(ab, u);
+      const d = c.distanceTo(p);
+      if (d < best) {
+        best = d; bs = this.cum[i - 1] + u * Math.sqrt(L2);
+        const hl = Math.hypot(ab.x, ab.z) || 1;
+        bl = ((p.x - c.x) * -ab.z + (p.z - c.z) * ab.x) / hl;
+        bh = p.y - c.y;
+      }
+    }
+    return { s: bs, lat: bl, h: bh };
+  }
+}
+const _sv = new THREE.Vector3(), _sv2 = new THREE.Vector3();
+export type Surface = {
+  grip?: number; bounce?: number; min?: number; max?: number; pushX?: number; pushZ?: number;
+  /** app 5: a chute to ride down */
+  slide?: SlidePath;
+  /** app 5: soft floor (ball pit): run speed and jump height factors */
+  soft?: { speed: number; jump: number };
+};
+/** something carrying the player that changes the jump off it (app 5: a swing gives its momentum) */
+export type Kick = { k: number; max: number };
 export type DeviceAction =
   | { kind: 'portal'; p: THREE.Vector3; yaw: number; dYaw: number }
   | { kind: 'launch'; v: THREE.Vector3 }
   | { kind: 'zip'; a: THREE.Vector3; b: THREE.Vector3; speed: number; id: string }
   | { kind: 'checkpoint'; p: THREE.Vector3; yaw: number; id: string }
   | { kind: 'collect'; id: string };
+
+/** app 5: what happened to plates this tick (sounds, and the game saves a latch) */
+export type DeviceEvent = { k: 'press' | 'bad' | 'latch' | 'crack'; id: string; p: THREE.Vector3 };
 
 const Y = new THREE.Vector3(0, 1, 0);
 const D2R = Math.PI / 180;
@@ -108,6 +208,15 @@ class Device implements Carrier {
   squash = -1;
   wasStood = false;
   active = true;
+  /** app 5: driven on by a plate (reveal), latched for good (plate), lit in its puzzle (plate) */
+  want = false;
+  latched = false;
+  lit = false;
+  /** reveal: progress 0 (hidden / raised) .. 1 (there / lowered) */
+  u = 0;
+  lamp: THREE.MeshStandardMaterial | null = null;
+  slide: SlidePath | null = null;
+  balls: { m: THREE.InstancedMesh; b: { x: number; z: number; y: number; vy: number; vx: number; vz: number }[]; feet: THREE.Vector3 | null; w: number; d: number } | null = null;
   constructor(public d: DeviceData, public data: { id: string }) {
     this.base.set(...d.p);
     this.pos.copy(this.base);
@@ -193,7 +302,7 @@ export class DeviceSystem {
           inner.add(o);
         }
       }
-      const look = !d.model;
+      const look = !d.model && !d.bare;
       switch (d.t) {
         case 'crumble':
         case 'blink':
@@ -213,6 +322,85 @@ export class DeviceSystem {
             if (d.t === 'conveyor') for (const sx of [-1, 1]) { const rim = box(0.2, th + 0.1, dd, tex.yellow, -th / 2 + 0.05); rim.position.x = sx * (w / 2 + 0.1); inner.add(rim); }
           }
           solid(new THREE.Vector3(w / 2, th / 2, dd / 2), new THREE.Vector3(0, -th / 2, 0));
+          if (d.t === 'plate' && (d.latch || d.puzzle)) {
+            // a lamp in the middle: lit once pressed (in the right order)
+            dv.lamp = new THREE.MeshStandardMaterial({ color: d.color ?? '#ffd166', emissive: d.color ?? '#ffd166', emissiveIntensity: 0.15, roughness: 0.3 });
+            const lamp = new THREE.Mesh(new THREE.CylinderGeometry(Math.min(w, dd) * 0.22, Math.min(w, dd) * 0.22, 0.06, 20), dv.lamp);
+            lamp.position.y = 0.03; inner.add(lamp);
+          }
+          break;
+        }
+        case 'slide': {
+          const pts = d.pts && d.pts.length >= 2 ? d.pts : [d.p, [d.p[0], d.p[1] - 1, d.p[2] + 3] as V3];
+          const W = d.w ?? 1.6;
+          const path = new SlidePath(pts, W, d.fric ?? 1.5, d.vmax ?? 11, id);
+          dv.slide = path;
+          dv.q.identity();
+          // one thin box per segment, its top on the centre line (placed once: a slide never moves)
+          for (let i = 1; i < path.pts.length; i++) {
+            const a = path.pts[i - 1], b = path.pts[i];
+            const dir = _v.subVectors(b, a); const len = dir.length(); dir.divideScalar(len);
+            const qq = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.asin(dir.y), Math.atan2(dir.x, dir.z), 0, 'YXZ'));
+            const half = new THREE.Vector3(W / 2, 0.15, len / 2 + 0.04);
+            const o = a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, -0.15, 0).applyQuaternion(qq));
+            const desc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z).setCollisionGroups(COLLISION.WORLD).setFriction(0)
+              .setTranslation(o.x, o.y, o.z).setRotation({ x: qq.x, y: qq.y, z: qq.z, w: qq.w });
+            const c = this.physics.world.createCollider(desc); this.physics.colliderCount++;
+            dv.bodies.push({ c, off: new THREE.Vector3(), half });
+            this.byHandle.set(c.handle, dv);
+          }
+          if (look) {
+            // an open trough along the centre line
+            const prof = [[-W / 2 - 0.12, 0.42], [-W / 2, 0.03], [W / 2, 0.03], [W / 2 + 0.12, 0.42]];
+            const n = Math.max(2, Math.ceil(path.L / 0.4) + 1), pos: number[] = [], idx: number[] = [];
+            const c0 = path.pts[0], sd = new THREE.Vector3(), pt = new THREE.Vector3();
+            for (let j = 0; j < n; j++) {
+              const sj = (path.L * j) / (n - 1);
+              path.at(sj, 0, pt); path.side(sj, sd);
+              for (const [x, y] of prof) pos.push(pt.x + sd.x * x - c0.x, pt.y + y - c0.y, pt.z + sd.z * x - c0.z);
+              if (j) for (let k = 0; k < 3; k++) { const a0 = (j - 1) * 4 + k, b0 = j * 4 + k; idx.push(a0, b0, a0 + 1, a0 + 1, b0, b0 + 1); }
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+            const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: d.color ?? '#ff8ac6', roughness: 0.3, side: THREE.DoubleSide }));
+            m.castShadow = m.receiveShadow = true; inner.add(m);
+          }
+          break;
+        }
+        case 'pit': {
+          const sink = d.sink ?? 0.7, rim = d.rim ?? 0;
+          solid(new THREE.Vector3(w / 2, 0.25, dd / 2), new THREE.Vector3(0, -sink - 0.25, 0));
+          if (rim > 0) {
+            const hy = (sink + rim) / 2, oy = (rim - sink) / 2;
+            for (const sx of [-1, 1]) solid(new THREE.Vector3(0.15, hy, dd / 2 + 0.3), new THREE.Vector3(sx * (w / 2 + 0.15), oy, 0));
+            for (const sz of [-1, 1]) solid(new THREE.Vector3(w / 2, hy, 0.15), new THREE.Vector3(0, oy, sz * (dd / 2 + 0.15)));
+          }
+          const pal = ['#ff5d73', '#ffd23f', '#3ec1ff', '#5be37d', '#b07cff', '#ff9a3c'];
+          if (look) {
+            const top = new THREE.Mesh(new THREE.PlaneGeometry(w, dd), new THREE.MeshStandardMaterial({ map: ballTex(pal, w / 1.8, dd / 1.8), roughness: 0.45 }));
+            top.rotation.x = -Math.PI / 2; top.position.y = -0.04; top.receiveShadow = true; inner.add(top);
+            if (rim > 0) for (const [bw, bd, x, z] of [[0.3, dd + 0.6, -w / 2 - 0.15, 0], [0.3, dd + 0.6, w / 2 + 0.15, 0], [w, 0.3, 0, -dd / 2 - 0.15], [w, 0.3, 0, dd / 2 + 0.15]]) {
+              const b = box(bw, sink + rim, bd, candy(d.color ?? '#7fd3ff', 0.6), (rim - sink) / 2); b.position.x = x; b.position.z = z; inner.add(b);
+            }
+          }
+          // loose balls that hop out of the way (look only)
+          const nb = d.n ?? (look ? 36 : 14);
+          if (nb > 0) {
+            const im = new THREE.InstancedMesh(new THREE.SphereGeometry(0.2, 10, 8), new THREE.MeshStandardMaterial({ roughness: 0.3 }), nb);
+            let seed = 0; for (const ch of id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+            const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+            const bl = [];
+            for (let i = 0; i < nb; i++) { bl.push({ x: (rnd() - 0.5) * (w - 0.5), z: (rnd() - 0.5) * (dd - 0.5), y: 0, vy: 0, vx: 0, vz: 0 }); im.setColorAt(i, new THREE.Color(pal[i % pal.length])); }
+            im.castShadow = true; inner.add(im);
+            dv.balls = { m: im, b: bl, feet: null, w, d: dd };
+            this.ballPose(dv);
+          }
+          break;
+        }
+        case 'reveal': {
+          const zc = d.tip ? dd / 2 : 0;
+          if (look) { const b = box(w, h, dd, d.color ? candy(d.color) : [tex.metal, tex.metal, tex.grate, tex.metal, tex.yellow, tex.yellow]); b.position.z = zc; inner.add(b); }
+          solid(new THREE.Vector3(w / 2, h / 2, dd / 2), new THREE.Vector3(0, -h / 2, zc));
           break;
         }
         case 'tilt': {
@@ -333,6 +521,7 @@ export class DeviceSystem {
       this.group.add(dv.group);
       this.list.push(dv);
       this.place(dv);
+      if (d.t === 'reveal' && !d.tip) { this.enable(dv, false); dv.group.visible = false; }
     }
   }
   private beltTex: THREE.Texture | null = null;
@@ -342,7 +531,7 @@ export class DeviceSystem {
     const q = dv.rotates ? new THREE.Quaternion().setFromAxisAngle(Y, dv.ang).premultiply(dv.q) : dv.q;
     const tilt = (dv as unknown as { tiltQ?: THREE.Quaternion }).tiltQ;
     const qq = tilt ? dv.q.clone().multiply(tilt) : q;
-    if (dv.d.t === 'drop') return; // placed per crate in step()
+    if (dv.d.t === 'drop' || dv.d.t === 'slide') return; // placed per crate in step() / placed once when built
     for (const b of dv.bodies) {
       const o = b.off.clone().applyQuaternion(qq).add(dv.pos);
       b.c.setTranslation({ x: o.x, y: o.y, z: o.z });
@@ -360,6 +549,7 @@ export class DeviceSystem {
     const dv = c ? this.byHandle.get(c.handle) : undefined;
     if (!dv) return null;
     if (dv.d.t === 'slippery') return { grip: dv.d.grip ?? 0.12 };
+    if (dv.d.t === 'slide' && dv.slide) return { slide: dv.slide };
     if (dv.d.t === 'trampoline') {
       const pu = dv.d.push ?? 0, r = (dv.d.r ?? 0) * D2R;
       return { bounce: dv.d.bounce ?? 0.9, min: dv.d.min ?? 11, max: dv.d.max ?? 24, ...(pu ? { pushX: Math.sin(r) * pu, pushZ: Math.cos(r) * pu } : {}) };
@@ -372,12 +562,22 @@ export class DeviceSystem {
     const dv = c ? this.byHandle.get(c.handle) : undefined;
     if (!dv) return;
     dv.stoodNow = true;
+    if (p && dv.balls) (dv.balls.feet ??= new THREE.Vector3()).copy(p);
     if (p && dv.d.t === 'tilt') (dv as unknown as { side: number }).side = Math.sign(_v.copy(p).sub(dv.base).applyQuaternion(_q.copy(dv.q).invert()).z) || 1;
   }
 
-  /** gravity scale and wind acceleration at p (feet) */
-  field(p: THREE.Vector3, out: { g: number; acc: THREE.Vector3 }) {
+  /** gravity scale and wind acceleration at p (feet); app 5: wading in a ball pit (a volume, whatever floor is under it) */
+  field(p: THREE.Vector3, out: { g: number; acc: THREE.Vector3; soft?: { speed: number; jump: number } | null }) {
     for (const dv of this.list) {
+      if (dv.d.t === 'pit') {
+        const [w, , dd] = dv.d.s ?? [3, 1, 3], sink = dv.d.sink ?? 0.7;
+        const l = _v.copy(p).sub(dv.base).applyQuaternion(_q.copy(dv.q).invert());
+        if (Math.abs(l.x) > w / 2 || Math.abs(l.z) > dd / 2 || l.y < -sink - 0.3 || l.y > 0.25) continue;
+        out.soft = { speed: dv.d.slow ?? 0.5, jump: dv.d.jump ?? 0.75 };
+        dv.stoodNow = true;
+        if (dv.balls) (dv.balls.feet ??= new THREE.Vector3()).copy(p);
+        continue;
+      }
       if (dv.d.t !== 'fan' && dv.d.t !== 'lowgrav') continue;
       if (dv.d.t === 'fan' && !dv.active) continue;
       const [w, h, dd] = dv.d.s ?? [3, 8, 3];
@@ -498,6 +698,20 @@ export class DeviceSystem {
     return null;
   }
 
+  /** distance from p to the nearest blowing fan's stream (sound) */
+  fanDistance(p: THREE.Vector3) {
+    let best = Infinity;
+    for (const dv of this.list) {
+      if (dv.d.t !== 'fan' || !dv.active) continue;
+      const [w, h, dd] = dv.d.s ?? [3, 8, 3];
+      const l = _v.copy(p).sub(dv.base).applyQuaternion(_q.copy(dv.q).invert());
+      const fw = dv.d.dir === 'forward';
+      const ex = Math.max(0, Math.abs(l.x) - w / 2), ey = fw ? Math.max(0, -l.y, l.y - dd) : Math.max(0, -l.y, l.y - h), ez = fw ? Math.max(0, -l.z, l.z - h) : Math.max(0, Math.abs(l.z) - dd / 2);
+      best = Math.min(best, Math.hypot(ex, ey, ez));
+    }
+    return best;
+  }
+
   /** pickups (collectible) of this map collected so far */
   collectedCount() { let n = 0; for (const id of this.used) if (this.byId.get(id)?.d.t === 'collectible') n++; return n; }
 
@@ -532,7 +746,7 @@ export class DeviceSystem {
       switch (d.t) {
         case 'crumble': {
           // 0 solid, 1 shaking (stood on), 2 fallen, back to 0 after respawn
-          if (dv.st === 0 && stood) { dv.st = 1; dv.stT = 0; }
+          if (dv.st === 0 && stood) { dv.st = 1; dv.stT = 0; this.events.push({ k: 'crack', id: dv.data.id, p: dv.base.clone() }); }
           dv.stT += dt;
           if (dv.st === 1) {
             const k = dv.stT / (d.delay ?? 0.8);
@@ -643,6 +857,43 @@ export class DeviceSystem {
           if (want !== dv.active) this.enable(dv, want);
           continue;
         }
+        case 'reveal': {
+          // driven on: after `delay` it rises into place (or lowers flat, a drawbridge); driven off: back again
+          const dur = d.dur ?? 0.7;
+          dv.stT = dv.want ? dv.stT + dt : 0;
+          dv.u = THREE.MathUtils.clamp(dv.u + ((dv.want && dv.stT >= (d.delay ?? 0)) ? dt : -dt) / dur, 0, 1);
+          const k = smooth(dv.u);
+          if (d.tip) {
+            (dv as unknown as { tiltQ: THREE.Quaternion }).tiltQ = new THREE.Quaternion().setFromAxisAngle(_x, -(d.tip * D2R) * (1 - k));
+            dv.group.quaternion.copy(dv.q).multiply((dv as unknown as { tiltQ: THREE.Quaternion }).tiltQ);
+          } else {
+            const r = d.rise ?? [0, -3, 0];
+            dv.pos.copy(dv.base).add(_v.set(r[0], r[1], r[2]).applyQuaternion(dv.q).multiplyScalar(1 - k));
+            if (dv.inner) dv.inner.scale.setScalar(0.35 + 0.65 * k);
+            dv.group.visible = dv.u > 0.001;
+            const on = dv.u > 0.55;
+            if (on !== dv.active) this.enable(dv, on);
+          }
+          break;
+        }
+        case 'pit': {
+          const B = dv.balls;
+          if (!B) continue;
+          let fx = 1e9, fz = 1e9;
+          if (stood && B.feet) { const l = _v.copy(B.feet).sub(dv.base).applyQuaternion(_q.copy(dv.q).invert()); fx = l.x; fz = l.z; }
+          const mx = B.w / 2 - 0.2, mz = B.d / 2 - 0.2;
+          for (const b of B.b) {
+            const dx = b.x - fx, dz = b.z - fz, r = Math.hypot(dx, dz);
+            if (r < 0.75 && b.y <= 0.001 && b.vy <= 0) { b.vy = 2 + Math.random() * 1.6; b.vx = (dx / (r || 1)) * 1.6; b.vz = (dz / (r || 1)) * 1.6; }
+            if (b.y > 0 || b.vy > 0) {
+              b.vy -= 14 * dt; b.y += b.vy * dt; b.x += b.vx * dt; b.z += b.vz * dt;
+              if (b.y <= 0) { b.y = 0; b.vy = b.vy < -1.5 ? -b.vy * 0.35 : 0; b.vx *= 0.5; b.vz *= 0.5; }
+            }
+            b.x = THREE.MathUtils.clamp(b.x, -mx, mx); b.z = THREE.MathUtils.clamp(b.z, -mz, mz);
+          }
+          this.ballPose(dv);
+          continue;
+        }
         case 'cannon': dv.stT = Math.max(0, dv.stT - dt); continue;
         case 'portal': { const ds = (dv as unknown as { discs?: THREE.Mesh[] }).discs; if (ds && d.need) { const open = this.collectedCount() >= d.need; for (const m of ds) m.visible = open; } continue; }
         case 'collectible': { const gem = (dv as unknown as { gem?: THREE.Mesh }).gem; if (gem) { gem.rotation.y = t * 2.2; gem.position.y = 1.0 + Math.sin(t * 2.4) * 0.12; } continue; }
@@ -652,18 +903,74 @@ export class DeviceSystem {
       dv.group.position.copy(dv.pos);
       this.place(dv);
     }
-    // plates drive their targets
+    // plates drive their targets (app 5: a latched plate stays on for good, a puzzle's plates go in order)
+    const drive = new Map<string, boolean>();
     for (const dv of this.list) {
-      if (dv.d.t !== 'plate' || !dv.d.target) continue;
-      const tg = this.byId.get(dv.d.target);
-      if (!tg) continue;
-      if (dv.stoodNow || dv.stoodT > 0) { dv.stT = dv.d.hold ?? 3; }
-      dv.stT = Math.max(0, dv.stT - dt);
-      const on = dv.stT > 0;
-      if (tg.d.t === 'piston') { tg.d.target = 'plate'; tg.active = on; }
-      else if (tg.d.t === 'elevator' && on && tg.st === 0) tg.active = false; // calls it
-      dv.group.position.y = dv.base.y - (on ? 0.08 : 0);
+      const d = dv.d;
+      if (d.t !== 'plate') continue;
+      const pressed = dv.stoodT > 0, edge = pressed && dv.stoodT <= dt * 1.5;
+      let on: boolean;
+      if (d.puzzle) {
+        if (edge) this.puzzlePress(dv);
+        on = dv.latched;
+      } else if (d.latch) {
+        if (edge && !dv.latched) { dv.latched = true; this.events.push({ k: 'latch', id: dv.data.id, p: dv.base.clone() }); }
+        dv.lit = dv.latched;
+        on = dv.latched;
+      } else {
+        if (pressed) dv.stT = d.hold ?? 3;
+        dv.stT = Math.max(0, dv.stT - dt);
+        on = dv.stT > 0;
+      }
+      dv.group.position.y = dv.base.y - (on || pressed || dv.lit ? 0.08 : 0);
+      if (dv.lamp) dv.lamp.emissiveIntensity = dv.lit ? 2.2 : 0.15;
+      if (d.target) drive.set(d.target, (drive.get(d.target) ?? false) || on);
     }
+    for (const [key, on] of drive) for (const tg of this.targets(key)) {
+      if (tg.d.t === 'piston') { tg.d.target = 'plate'; tg.active = on; }
+      else if (tg.d.t === 'elevator') { if (on && tg.st === 0) tg.active = false; } // calls it
+      else if (tg.d.t === 'reveal') tg.want = on;
+    }
+  }
+
+  /** plate puzzle: the next plate in order lights up, a wrong one puts them all out (the first one starts again) */
+  private puzzlePress(dv: Device) {
+    const P = dv.d.puzzle!;
+    const all = this.list.filter((x) => x.d.t === 'plate' && x.d.puzzle === P);
+    if (dv.lit || all.some((x) => x.latched)) return;
+    const next = all.filter((x) => x.lit).length + 1, k = dv.d.order ?? 1;
+    if (k === next) {
+      dv.lit = true;
+      if (next >= all.length) { for (const x of all) { x.latched = true; x.lit = true; } this.events.push({ k: 'latch', id: P, p: dv.base.clone() }); }
+      else this.events.push({ k: 'press', id: dv.data.id, p: dv.base.clone() });
+    } else {
+      for (const x of all) x.lit = false;
+      if (k === 1) dv.lit = true;
+      this.events.push({ k: 'bad', id: dv.data.id, p: dv.base.clone() });
+    }
+  }
+
+  /** devices a plate's target names (an id, or a group) */
+  private targets(key: string) { const one = this.byId.get(key); return one ? [one] : this.list.filter((x) => x.d.grp === key); }
+
+  /** plate events since the last call (the game plays sounds and saves latches) */
+  events: DeviceEvent[] = [];
+  drainEvents() { const e = this.events; this.events = []; return e; }
+
+  /** plates / puzzles latched in an earlier session (plate or puzzle ids): on, and what they open is already there */
+  markLatched(ids: Iterable<string>) {
+    const set = new Set(ids);
+    for (const dv of this.list) {
+      if (dv.d.t !== 'plate' || !(set.has(dv.data.id) || (dv.d.puzzle && set.has(dv.d.puzzle)))) continue;
+      dv.latched = dv.lit = true;
+      if (dv.d.target) for (const tg of this.targets(dv.d.target)) if (tg.d.t === 'reveal') { tg.want = true; tg.u = 1; tg.stT = 1e3; }
+    }
+  }
+
+  private ballPose(dv: Device) {
+    const B = dv.balls!;
+    B.b.forEach((b, i) => { _m.makeTranslation(b.x, b.y + 0.02, b.z); B.m.setMatrixAt(i, _m); });
+    B.m.instanceMatrix.needsUpdate = true;
   }
 
   private enable(dv: Device, on: boolean) {
@@ -676,3 +983,23 @@ export class DeviceSystem {
 
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _p = new THREE.Vector3(), _p2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _x = new THREE.Vector3(1, 0, 0);
+const _m = new THREE.Matrix4();
+
+/** a layer of plastic balls seen from above (ball pit surface) */
+function ballTex(pal: string[], rx: number, rz: number) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#e9e4f5'; g.fillRect(0, 0, 256, 256);
+  let seed = 7; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < 420; i++) {
+    const x = rnd() * 256, y = rnd() * 256, r = 9 + rnd() * 3, col = pal[i % pal.length];
+    for (const [ox, oy] of [[0, 0], [256, 0], [-256, 0], [0, 256], [0, -256]]) {
+      const gr = g.createRadialGradient(x + ox - r * 0.35, y + oy - r * 0.35, r * 0.1, x + ox, y + oy, r);
+      gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.25, col); gr.addColorStop(1, col);
+      g.fillStyle = gr; g.beginPath(); g.arc(x + ox, y + oy, r, 0, Math.PI * 2); g.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, rz);
+  return t;
+}

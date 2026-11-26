@@ -12,6 +12,8 @@ export type SaveData = {
   slipTips?: number; // how many times the "pull back to save a misstep" tip was shown
   /** optional pickups collected (device ids, map-qualified: map003:gem1) */
   collected?: string[];
+  /** plates / plate puzzles latched for good (map-qualified: map007:puzzle5), app 5 */
+  latched?: string[];
   /** player name + device identity for the online leaderboard (made on the device, no account needed) */
   profile?: { name: string; id: string; token: string; tag?: string };
   /** signature of the results last accepted by the leaderboard server (resubmit when they improve) */
@@ -20,7 +22,7 @@ export type SaveData = {
   mode?: GameMode;
   /** Challenge mode: only records and achievements are kept (never a position or a run in progress) */
   challenge?: ChallengeRecords;
-  settings: { volume: number; quality: Quality | null; sensitivity: number; showFps: boolean; autoCam: boolean | null };
+  settings: { volume: number; quality: Quality | null; sensitivity: number; showFps: boolean; autoCam: boolean | null; music?: number };
 };
 
 /** Adventure: as before (continue from conquered maps). Challenge: every run from 0 m, falls must be re-climbed. */

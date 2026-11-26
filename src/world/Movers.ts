@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { MoverData } from './MapTypes';
+import type { Kick } from './Devices';
 import { Physics } from '../core/Physics';
 import { Assets, bakedGeometry, lod0Mesh } from '../core/Assets';
 import { COLLISION } from '../config';
 import * as CT from './CityTextures';
 
 const Y = new THREE.Vector3(0, 1, 0);
+const _ax = new THREE.Vector3();
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const D2R = Math.PI / 180;
 
@@ -51,8 +53,14 @@ export class Mover {
   private prevAng = 0;
   dAng = 0;
   private center = new THREE.Vector3();
+  /** swing angle now and one tick ago (the tilted look interpolates it) */
+  private th = 0;
+  private prevTh = 0;
+  /** app 5: a swing seat throws you off with its momentum */
+  readonly kick: Kick | null;
 
   constructor(public data: MoverData) {
+    this.kick = data.kind === 'swing' && data.kick ? { k: data.kick, max: data.vmax ?? 14 } : null;
     this.rotates = data.kind === 'rotor';
     this.pts = data.pts.map((p) => new THREE.Vector3(...p));
     if (data.kind === 'swing') {
@@ -162,6 +170,7 @@ export class Mover {
     this.sample(t, this.pos);
     this.delta.subVectors(this.pos, this.prev);
     this.vel.copy(this.delta).divideScalar(Math.max(1e-4, dt));
+    if (this.data.kind === 'swing') { this.prevTh = this.th; this.th = this.theta(t); }
     if (this.rotates) { this.prevAng = this.ang; this.ang = this.angleAt(t); this.dAng = this.ang - this.prevAng; }
     this.placeColliders();
   }
@@ -172,6 +181,7 @@ export class Mover {
     this.prev.copy(this.pos);
     this.delta.set(0, 0, 0);
     this.vel.set(0, 0, 0);
+    if (this.data.kind === 'swing') this.th = this.prevTh = this.theta(t);
     if (this.rotates) { this.ang = this.prevAng = this.angleAt(t); this.dAng = 0; }
     this.placeColliders();
   }
@@ -195,6 +205,11 @@ export class Mover {
     if (this.rotates) {
       this.group.position.copy(this.center);
       this.group.rotation.y = this.prevAng + (this.ang - this.prevAng) * alpha;
+    }
+    if (this.data.kind === 'swing' && this.data.tilt) {
+      // the seat turns with its chains about the pivot axis (horizontal, across the swing plane)
+      const th = (this.prevTh + (this.th - this.prevTh) * alpha) * this.data.tilt;
+      this.group.quaternion.setFromAxisAngle(_ax.set(this.swingDir.z, 0, -this.swingDir.x), -th);
     }
     const p = this.group.position;
     if (this.trolley && this.cable) {

@@ -85,6 +85,13 @@ export interface MoverData {
   period?: number;
   /** swing (app 4+): false = no hoist cable drawn (the model brings its own vines / ropes); older apps draw it */
   rope?: boolean;
+  /** swing (app 5+): jumping off keeps `kick` x the seat's velocity (horizontal speed capped at `vmax` m/s, default
+   *  14) and the flight keeps that speed; older apps: the plain carried velocity */
+  kick?: number;
+  vmax?: number;
+  /** swing (app 5+): the look swings like a real seat on chains: it turns `tilt` x the swing angle about the pivot
+   *  (1 = rigidly, the model's chains reaching up to the pivot); the floor collider stays level. Older apps: level */
+  tilt?: number;
   // rotor
   center?: V3;
   arm?: number; // rotor: distance of the reference stand point from the axis (along the jib)
@@ -181,6 +188,8 @@ export interface MapData {
   padModel?: { file: string; w: number; d: number; top: number };
   /** gameplay devices (crumbling floors, conveyors, fans, ziplines ...): see src/world/Devices.ts */
   devices?: import('./Devices').DeviceData[];
+  /** sound of the map (app 5+): music preset, ambient layers, footsteps, wind; see src/systems/Audio.ts */
+  audio?: import('../systems/Audio').AudioProfile;
   /** sprite atlas (logical path without extension); default: Map 001's */
   atlas?: string;
   /** models of the moving-platform looks this map uses (logical paths without .glb), overriding the engine's

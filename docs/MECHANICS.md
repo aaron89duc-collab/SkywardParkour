@@ -16,7 +16,8 @@ step of the route with the real controller).
 
 All of these exist in the engine (`MECHANICS` in `src/content/ContentManager.ts`). Movers live in
 `src/world/Movers.ts` (`movers` in the map JSON), devices in `src/world/Devices.ts` (`devices` in the map JSON).
-Every device is checked by `devtools/devices.cjs` (20/20) with the real player controller.
+Every device is checked by `devtools/devices.cjs` (20/20) with the real player controller; the app 5 ones by
+`devtools/out/mech7.cjs`.
 
 | # | Id | Player experience | Main parameters |
 |---|---|---|---|
@@ -27,7 +28,7 @@ Every device is checked by `devtools/devices.cjs` (20/20) with the real player c
 | 5 | `speed-ring` | fly through a hoop, get boosted | `s`, `v` |
 | 6 | `mover:crane` | ride a load along a path | `pts`, `speed`, `wait` |
 | 7 | `mover:hover` | ride a platform (looks: hover, pallet, lift car, trolley); hang from its edge and ride | `pts`, `speed`, `wait`, `phase` |
-| 8 | `mover:swing` | ride a pendulum container, leap at the extremes | `len`, `amp`, `period`, `phase`; app 4+: `rope: false` (the model brings its own vines: a swinging log bridge) |
+| 8 | `mover:swing` | ride a pendulum container, leap at the extremes | `len`, `amp`, `period`, `phase`; app 4+: `rope: false` (the model brings its own vines: a swinging log bridge); app 5+: `kick` (jumping off keeps kick x the seat's speed, capped at `vmax`, default 14 m/s, kept in the flight: jump at the bottom to fly far), `tilt` (the look turns with the swing angle about the pivot: a seat on chains; the floor stays level) |
 | 9 | `mover:rotor` | ride a turning arm (crane jib) | `a0`, `a1`, `speed`, `wait` |
 | 10 | `crumble` | platform shakes when you land and drops after `delay` s, comes back after `respawn` s | `delay`, `respawn` |
 | 11 | `blink` | platform solid for `on` s, gone for `off` s (flickers 0.5 s before) | `on`, `off`, `phase` |
@@ -40,7 +41,7 @@ Every device is checked by `devtools/devices.cjs` (20/20) with the real player c
 | 18 | `slippery` | ice: almost no grip, long slides | `grip` |
 | 19 | `trampoline` | bounces you back up with most of your landing speed; the look squashes and wobbles (app 4+) | `bounce`, `min`, `max`; app 4+: `push` (m/s sideways along the yaw: a tilted mushroom cap) |
 | 20 | `zipline` | jump into the cable → slide down it; jump to let go | `p` → `b`, `speed` |
-| 21 | `plate` | stand on it → its `target` piston slides out / elevator comes | `target`, `hold` |
+| 21 | `plate` | stand on it → its `target` piston slides out / elevator comes / reveal appears | `target` (a device id or a `grp`), `hold`; app 5+: `latch` (stays on for good, saved: a shortcut), `puzzle` + `order` (plates of one puzzle pressed 1, 2, 3 …; a wrong one puts them out; solved = latched, saved; lamps show the lit ones) |
 | 22 | `elevator` | waits until you step on, rides to `b`, waits, comes back | `b`, `speed`, `wait` |
 | 23 | `cannon` | walk in → fired along a fixed arc | `r`, `pitch`, `v` |
 | 24 | `drop` | crates fall on a schedule: dodge them or ride one down | `fall`, `speed`, `interval` |
@@ -49,6 +50,9 @@ Every device is checked by `devtools/devices.cjs` (20/20) with the real player c
 | 27 | `oneway` | platform you jump up through from below | – |
 | 28 | `checkpoint` | flag: falling out of the map brings you back here (Adventure) | – |
 | 29 | `collectible` | optional gem on the risky line (saved per map) | `id` |
+| 30 | `slide` (app 5) | step or drop onto the chute → ride it down (speed builds on the slope), lean with the stick, jump to leave (jump at the end to fly far), thrown off the end (a last segment pointing up = a ramp) | `pts` (centre line of the surface, top → bottom, world points, sampled ~1 m on curves), `w`, `fric`, `vmax` (default 11), `bare: true` (no built-in trough: the slide model is a prefab; Map 007 measures the models' chutes in `build-map007.mjs`) |
+| 31 | `pit` (app 5) | ball pit: you sink in, wade at half speed, jump lower, no hard landing; loose balls hop away | `s` [w, -, d], `sink` (0.7), `slow` (0.5), `jump` (0.75), `rim` (soft walls above the balls), `n` (loose balls) |
+| 32 | `reveal` (app 5) | a piece that appears (rises into place) or a drawbridge that lowers when a plate / puzzle drives it | `rise` (offset it comes from, default 3 m below), `dur`, `delay` (stagger a staircase), `tip` (degrees raised: drawbridge, hinge at p, deck along +z), `grp` |
 
 ## 2. How a map uses a mechanic (data only)
 
@@ -131,6 +135,14 @@ secret ledge on the wall with a gem → the rampart) and the gem portal (5 gems 
 - `fx` `{ t: 'birds', p, r, n?, c? }` = a flock circling p (older apps ignore it).
 - Secret updrafts pulse (force ≈ 50): they lift about 1.1 × their height and drop you again, so they reach the hidden
   ledge but can never throw a player up to a later part of the map (`devtools/out/fanmax.cjs` measures the top).
+- Sound (app 5+, all procedural, no files): `audio: { music, amb, steps, wind }`.
+  `music`: village · city · port · candy · toy · forest · playground (a soft generative tune: chords, bass, a
+  melody that repeats and varies every 4 bars). `amb` layers: birds · bells · chimes · horns · pigeons · city (hum) ·
+  gulls · shiphorn · metal · water (lapping) · sparkle · pops · toys · drips · frogs · owl · crickets · playground.
+  `steps`: grass · stone · metal · wood · soft · candy. `wind`: scale (1 = default). Unknown ids are skipped; maps
+  without `audio` use `AUDIO_DEFAULTS` (Maps 001–007). Players set the music level in Settings ("Nhạc nền").
+  Engine sounds: slide / zipline friction, a fan's air nearby, swing creaks, crumbling cracks, cannon boom, ball
+  pit wading, plate puzzle notes. `node devtools/out/soundtour.cjs` records every map into `soundtour.mp3`.
 - Prefabs with `col: false` are walk-through decoration (bushes, the chocolate waterfall); invisible `wall` kit
   pieces make a model solid only where it should be (the walk-in gingerbread house).
 
