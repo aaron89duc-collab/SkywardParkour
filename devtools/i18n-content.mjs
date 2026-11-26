@@ -30,6 +30,17 @@ export const I18N = {
     signs: { 'CANDY KINGDOM|Vương quốc kẹo · 520 → 720 m': 'CANDY KINGDOM|The kingdom of sweets · 520 → 720 m' },
     summary: 'A candy kingdom in the sky · 520 → 720 m · 7 zones · spinning donuts, bouncy jellies, chocolate rivers, swinging lollipops, a candy castle, secret ways',
   },
+  map005: {
+    zones: { A: 'Toy Gate', B: 'Robot Workshop', C: 'Sky Railway', D: 'Sky Speedway', E: 'Seesaw Playground', F: 'Block Canyon', G: 'Toy Summit' },
+    finishHint: 'Hint: Toy Universe hides 7 gems behind the teddy, the robot, the toy house, the speedway, the rocking horse and the block towers – collect 5 and the shortcut portal at Toy Summit opens…',
+    signs: {
+      'TOY UNIVERSE|Thế giới đồ chơi · 720 → 935 m': 'TOY UNIVERSE|A giant world of toys · 720 → 935 m',
+      'XE ĐUA|Cưỡi xe đua qua khe hở': 'RACE CAR|Ride the race car over the gap',
+      'ĐẠI BÁC|Bước vào để bay lên tháp 3': 'TOY CANNON|Walk in to fly up to tower 3',
+      'CỔNG ĐÁ QUÝ|Cần 5 viên đá quý · bay thẳng lên gần đỉnh': 'GEM PORTAL|Needs 5 gems · flies you up near the summit',
+    },
+    summary: 'A giant world of toys · 720 → 935 m · 7 zones · teddy, robots, toy trains, race cars, spinning tops, seesaws, a rocking horse, a toy cannon and secret ways',
+  },
 };
 
 /** adds the `_en` (and for map001's English zone names, `_vi`) fields to a map's data; returns it */
@@ -54,7 +65,7 @@ export function applyPackI18n(id, meta) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const ROOT = new URL('../', import.meta.url).pathname;
-  const files = { map001: 'public/maps/map001.json', map002: 'packs/map002/maps/map002.json', map003: 'packs/map003/maps/map003.json', map004: 'packs/map004/maps/map004.json' };
+  const files = { map001: 'public/maps/map001.json', map002: 'packs/map002/maps/map002.json', map003: 'packs/map003/maps/map003.json', map004: 'packs/map004/maps/map004.json', map005: 'packs/map005/maps/map005.json' };
   for (const [id, f] of Object.entries(files)) {
     const p = ROOT + f;
     if (!fs.existsSync(p)) continue;
