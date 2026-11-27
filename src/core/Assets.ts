@@ -63,9 +63,8 @@ export class Assets {
 
   constructor() {
     this.loader = new GLTFLoader();
-    // decode compressed meshes in background threads: a map streaming in mid-climb does not stall the game
-    const dec = MeshoptDecoder as typeof MeshoptDecoder & { useWorkers?: (n: number) => void };
-    try { dec.useWorkers?.(Math.min(2, Math.max(1, (navigator.hardwareConcurrency || 2) - 1))); } catch { /* main thread then */ }
+    // NOTE: no MeshoptDecoder.useWorkers(): its worker is built from Function.toString(), which a minified
+    // production build breaks ("workerProcess is not defined" - the game hung on the loading screen, c34)
     this.loader.setMeshoptDecoder(MeshoptDecoder);
   }
 
