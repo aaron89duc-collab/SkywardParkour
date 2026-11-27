@@ -165,7 +165,14 @@ export class Game {
     await this.content.init();
     this.assets.resolver = this.content.resolve;
     this.maps.onLoadStart = (id) => this.content.pin(id);
-    this.content.onChange(() => { this.maps.syncGates((id, fb) => this.nextInfo(id, fb)); this.ui.refreshMaps?.(); });
+    this.content.onChange(() => {
+      this.maps.syncGates((id, fb) => this.nextInfo(id, fb));
+      this.ui.refreshMaps?.();
+      // a map finished downloading in the background (the next one while climbing): put it in the world right away,
+      // so the gate at the top is open when the player gets there (before: only on the next change of map)
+      const ids = this.content.entries().map((e) => e.id).join(',');
+      if (ids !== this.playableIds) { this.playableIds = ids; if (this.map) void this.loadOtherMaps(); }
+    });
     this.maps.setRegistry(this.content.entries());
     await this.maps.load(this.maps.registry[0]);
     this.map = this.maps.primary!;
@@ -853,6 +860,7 @@ export class Game {
   // a 120 Hz phone that manages 70-90 FPS shows frames for 1 or 2 screen refreshes at random (judder);
   // a steady 60 looks smoother. Automatic: on screens of 100 Hz and more, when the game cannot keep up.
   private tuneTimer = 4;
+  private playableIds = '';
   private lastRaf = -1;
   private lastFrameT = -1;
   private rafDts: number[] = [];
