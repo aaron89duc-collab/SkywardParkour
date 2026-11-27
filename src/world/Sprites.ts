@@ -102,6 +102,7 @@ export class SpriteSystem {
   private meta: { x: number; y: number; z: number; h: number; reach: number; keep: number }[] = [];
   private attrs: THREE.InstancedBufferAttribute[] = [];
   private shown: number[] = [];
+  private on = new Uint8Array(0);
   private lastT = -1e9;
   private lastCam = new THREE.Vector3(1e9, 0, 0);
   detail: SpriteDetail = { spriteK: 12, spriteDensity: 0.5 };
@@ -140,6 +141,7 @@ export class SpriteSystem {
       this.meta.push({ x: s.p[0], y: s.p[1] + (m?.k === 'rise' ? (m.span ?? 40) * 0.5 : 0) + s.h * 0.5, z: s.p[2], h: s.h, reach, keep });
     });
     this.all = { pos, size, uv, sway, mv, mv2 };
+    this.on = new Uint8Array(n);
     const mk = (src: Float32Array, k: number) => new THREE.InstancedBufferAttribute(new Float32Array(src.length), k);
     this.attrs = [mk(pos, 3), mk(size, 2), mk(uv, 4), mk(sway, 1), mk(mv, 4), mk(mv2, 4)];
     ['iPos', 'iSize', 'iUv', 'iSway', 'iMv', 'iMv2'].forEach((name, k) => geo.setAttribute(name, this.attrs[k]));
@@ -170,11 +172,13 @@ export class SpriteSystem {
       const dx = m.x - cam.x, dz = m.z - cam.z, hor = Math.hypot(dx, dz);
       const dy = cam.y - m.y; // > 0: the prop is below the camera
       const d = Math.max(0, Math.hypot(hor, dy) - m.reach);
-      if (dy > 60 + m.reach * 0.25) continue;
-      if (dy > 18 && dy / Math.max(1, hor - m.reach) > 0.8) continue;
-      if (d > Math.max(30, m.h * D.spriteK)) continue;
-      if (d > 30 && m.keep > D.spriteDensity) continue;
-      out.push(i);
+      const k = this.on[i] ? 1 : 0.9; // hysteresis: a hidden prop comes back 10 % inside the limits (no popping)
+      const vis = !(dy > (60 + m.reach * 0.25) * k)
+        && !(dy > 18 * k && dy / Math.max(1, hor - m.reach) > 0.8 * k)
+        && !(d > Math.max(30, m.h * D.spriteK) * k)
+        && !(d > 30 * k && m.keep > D.spriteDensity);
+      this.on[i] = vis ? 1 : 0;
+      if (vis) out.push(i);
     }
     if (!force && out.length === this.shown.length && out.every((v, k) => v === this.shown[k])) return;
     this.shown = out;

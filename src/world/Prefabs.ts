@@ -3,7 +3,7 @@ import { breathe } from '../core/Budget';
 import { Assets, bakedGeometry } from '../core/Assets';
 import { Physics } from '../core/Physics';
 import type { PrefabData } from './MapTypes';
-import { simplifier, type Detail } from './Detail';
+import { simplifier, disposeLod, type Detail } from './Detail';
 
 /** Meshy AI models (normalised offline: base at y=0, centred, height = 1). */
 export const PREFAB_FILES: Record<string, string> = {
@@ -71,6 +71,8 @@ type Batch = {
 };
 
 const tmpM = new THREE.Matrix4();
+/** level-of-detail hysteresis: back to the finer level only this much closer than the threshold */
+const HYST = 0.88;
 
 /** Instanced rendering of all prefab placements with distance-based LOD and trimesh colliders. */
 export class PrefabSystem {
@@ -173,10 +175,14 @@ export class PrefabSystem {
     const file = (b as Batch & { fileLod1?: { g: THREE.BufferGeometry; mat: THREE.Material } | null }).fileLod1 ?? null;
     const two = () => {
       if (!b.lod1) return;
-      void simplifier.get(b.lod1.geometry, 0.3).then((g) => { if (g && !this.dead) { b.lod2 = this.inst(b, g, b.lod1!.material, 'lod2', false); b.state.fill(255); } });
+      void simplifier.get(b.lod1.geometry, 0.3, false, this.owner).then((g) => {
+        if (!g) return;
+        if (this.dead) { disposeLod(g); return; } // the map went away while the worker was busy
+        b.lod2 = this.inst(b, g, b.lod1!.material, 'lod2', false); b.state.fill(255);
+      });
     };
-    void simplifier.get(b.lod0.geometry, 0.25).then((g) => {
-      if (this.dead) return;
+    void simplifier.get(b.lod0.geometry, 0.25, false, this.owner).then((g) => {
+      if (this.dead) { if (g) disposeLod(g); return; }
       if (g) { this.setLod1(b, g, b.lod0.material); b.good = true; }
       else if (file) this.setLod1(b, file.g, file.mat);
       else return;
@@ -185,7 +191,9 @@ export class PrefabSystem {
     });
   }
 
-  dispose() { this.dead = true; }
+  /** handed to the simplifier: jobs of an unloaded map are skipped */
+  private owner = { dead: false };
+  dispose() { this.dead = true; this.owner.dead = true; }
 
   private addCollider(src: Float32Array, idx: Uint32Array, m: THREE.Matrix4) {
     const out = new Float32Array(src.length);
@@ -218,10 +226,14 @@ export class PrefabSystem {
       for (let i = 0; i < n; i++) {
         const r = b.radius[i];
         const d = Math.max(0, camPos.distanceTo(b.positions[i]) - r);
+        // hysteresis: a level is left at its threshold but only taken back 12 % closer, so an instance standing
+        // right at a threshold does not flip back and forth (popping)
+        const cur = b.state[i] === 255 ? -1 : b.state[i];
+        const H = (beyond: boolean) => (beyond ? HYST : 1);
         let st: number;
-        if (d > Math.max(D.cullMin, r * D.cullK)) st = 4;
-        else if (d < (b.good ? Math.max(D.lod0MinGood, r * D.lod0KGood) : Math.max(D.lod0Min, r * D.lod0K)) || !b.lod1) st = 0;
-        else if (d < Math.max(D.lod1Min, r * D.lod1K) || !b.lod2) st = d < D.shadowDist ? 1 : 2;
+        if (d > Math.max(D.cullMin, r * D.cullK) * H(cur === 4)) st = 4;
+        else if (d < (b.good ? Math.max(D.lod0MinGood, r * D.lod0KGood) : Math.max(D.lod0Min, r * D.lod0K)) * H(cur >= 1) || !b.lod1) st = 0;
+        else if (d < Math.max(D.lod1Min, r * D.lod1K) * H(cur >= 3) || !b.lod2) st = d < D.shadowDist * H(cur === 2 || cur === 3) ? 1 : 2;
         else st = 3;
         if (b.state[i] !== st) { b.state[i] = st; changed = true; }
       }

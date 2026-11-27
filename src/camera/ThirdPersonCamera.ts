@@ -119,8 +119,13 @@ export class ThirdPersonCamera {
     if (hit !== null) allowed = Math.max(0.5, hit - 0.05);
     // snap in (never look through a wall); ease back out only once nothing has been hit for a moment, so a
     // railing or an edge that the sweep touches every other frame does not make the camera pump in and out
+    // (the hold restarts on every frame the sweep is still blocked near the current distance, not only on a snap)
     if (allowed < this.currentDist - 0.01) { this.currentDist = allowed; this.holdOut = 0.18; }
-    else if ((this.holdOut -= dt) <= 0) this.currentDist = Math.min(allowed, this.currentDist + dt * 7 * Math.min(1, (allowed - this.currentDist) * 2 + 0.25));
+    else {
+      if (hit !== null && allowed < this.currentDist + 0.3) this.holdOut = 0.18;
+      else this.holdOut -= dt;
+      if (this.holdOut <= 0) this.currentDist = Math.min(allowed, this.currentDist + dt * 7 * Math.min(1, (allowed - this.currentDist) * 2 + 0.25));
+    }
     this.desired.copy(this.target).addScaledVector(this.dir, this.currentDist);
     this.camera.position.copy(this.desired);
     this.camera.lookAt(this.target);

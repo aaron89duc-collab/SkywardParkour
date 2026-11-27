@@ -73,6 +73,22 @@ crate switches early and a tower late, and the error on screen stays about the s
 
 - Sun shafts and the lens flare (`effects`) are drawn only on high.
 
+## Review fixes (c37–c38)
+- Simplifier:
+  - the main thread only memcpys the position / index buffers; dequantizing / de-interleaving happens in the worker;
+  - jobs are sent one at a time;
+  - jobs of unloaded maps (`owner.dead`) are dropped;
+  - copies that arrive after an unload are disposed.
+- Auto FPS limit:
+  - needs 3 slow 2-s windows in a row; windows with a frame > 100 ms are ignored;
+  - while limited it tries without the limit every 30 s.
+- Camera: the ease-out hold restarts every frame the sweep is still blocked near the current distance.
+- Hysteresis on every level-of-detail / culling / PNG-prop threshold: a level is left at T but only taken back
+  at 0.88 T (props 0.9 T), so nothing flips at a threshold. There is no cross-fade.
+- `MeshoptDecoder.useWorkers()` must NOT be used: its worker is built from `Function.toString()` and breaks in a
+  minified build (c34 hung on the loading screen; fixed in c37).
+- Always check a production build (`vite build` + a static server) before delivering.
+
 ## PNG props (world/Sprites.ts, c35)
 Every 250 ms the props worth drawing are copied to the front of the instance buffers:
 - all props within 30 m; beyond that only a share of them (`spriteDensity`: 0.3 / 0.5 / 0.75), chosen by a

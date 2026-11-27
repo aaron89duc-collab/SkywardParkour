@@ -72,11 +72,19 @@ export function tuneMaterials(root: THREE.Object3D, full = true) {
 }
 
 // -------------------------------------------------------------------------- simplifier
-/** Simplified copies of geometries (shared attributes, new index), made in a worker and cached per geometry. */
+type Job = { src: THREE.BufferGeometry; ratio: number; permissive: boolean; owner: { dead?: boolean } | null; res: (g: THREE.BufferGeometry | null) => void };
+
+/**
+ * Simplified copies of geometries (shared attributes, new index), made in a worker and cached per geometry.
+ * The main thread only copies the raw buffers (a memcpy); reading quantized / interleaved positions into floats
+ * happens in the worker. Jobs are sent one at a time, so a map that asks for 30 copies at once does not cost the
+ * frame anything, and jobs whose owner (a map) went away meanwhile are dropped before they start.
+ */
 export class Simplifier {
   private worker: Worker | null = null;
   private seq = 0;
-  private waiting = new Map<number, (idx: Uint32Array | null) => void>();
+  private queue: Job[] = [];
+  private busy: { id: number; job: Job } | null = null;
   private cache = new WeakMap<THREE.BufferGeometry, Map<number, Promise<THREE.BufferGeometry | null>>>();
   private broken = false;
 
@@ -85,39 +93,66 @@ export class Simplifier {
     try {
       this.worker = new Worker(new URL('./simplify.worker.ts', import.meta.url), { type: 'module' });
       this.worker.onmessage = (e: MessageEvent<{ id: number; idx: Uint32Array | null }>) => {
-        const f = this.waiting.get(e.data.id);
-        this.waiting.delete(e.data.id);
-        f?.(e.data.idx);
+        const b = this.busy;
+        if (!b || b.id !== e.data.id) return;
+        this.busy = null;
+        b.job.res(this.finish(b.job, e.data.idx));
+        this.pump();
       };
-      this.worker.onerror = () => { this.broken = true; for (const f of this.waiting.values()) f(null); this.waiting.clear(); };
+      this.worker.onerror = () => {
+        this.broken = true;
+        this.busy?.job.res(null); this.busy = null;
+        for (const j of this.queue) j.res(null);
+        this.queue = [];
+      };
     } catch { this.broken = true; }
     return this.worker;
   }
 
-  /** a copy with about `ratio` of the triangles (null when it cannot be made or would not be much simpler) */
-  get(src: THREE.BufferGeometry, ratio: number, permissive = false): Promise<THREE.BufferGeometry | null> {
+  /** a copy with about `ratio` of the triangles (null when it cannot be made or would not be much simpler).
+   *  `owner.dead` set later = not needed any more (its map was unloaded): the job is skipped. */
+  get(src: THREE.BufferGeometry, ratio: number, permissive = false, owner: { dead?: boolean } | null = null): Promise<THREE.BufferGeometry | null> {
     let per = this.cache.get(src);
     if (!per) { per = new Map(); this.cache.set(src, per); }
     const key = permissive ? -ratio : ratio;
     let p = per.get(key);
-    if (!p) { p = this.make(src, ratio, permissive); per.set(key, p); }
+    if (!p) {
+      p = new Promise((res) => {
+        if (!this.start() || src.groups.length > 1 || !src.getAttribute('position')) { res(null); return; }
+        this.queue.push({ src, ratio, permissive, owner, res });
+        this.pump();
+      });
+      per.set(key, p);
+    }
     return p;
   }
 
-  private async make(src: THREE.BufferGeometry, ratio: number, permissive: boolean): Promise<THREE.BufferGeometry | null> {
-    const w = this.start();
-    if (!w || src.groups.length > 1) return null;
-    const pa = src.getAttribute('position');
-    if (!pa) return null;
-    const n = pa.count;
-    const pos = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { pos[i * 3] = pa.getX(i); pos[i * 3 + 1] = pa.getY(i); pos[i * 3 + 2] = pa.getZ(i); }
-    const ix = src.getIndex();
-    const idx = ix ? Uint32Array.from(ix.array as ArrayLike<number>) : null;
-    const before = ix ? ix.count : n;
+  private pump() {
+    if (this.busy || !this.worker) return;
+    let job: Job | undefined;
+    while ((job = this.queue.shift())) {
+      if (job.owner?.dead) { job.res(null); this.cache.get(job.src)?.delete(job.permissive ? -job.ratio : job.ratio); continue; }
+      break;
+    }
+    if (!job) return;
+    const pa = job.src.getAttribute('position') as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+    const inter = (pa as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute ? (pa as THREE.InterleavedBufferAttribute) : null;
+    const raw = (inter ? inter.data.array : (pa as THREE.BufferAttribute).array) as ArrayLike<number> & { slice(): ArrayBufferView & { buffer: ArrayBuffer } };
+    const arr = raw.slice(); // memcpy
+    const ix = job.src.getIndex();
+    const idx = ix ? (ix.array as Uint16Array | Uint32Array).slice() : null;
     const id = ++this.seq;
-    const out = await new Promise<Uint32Array | null>((res) => { this.waiting.set(id, res); w.postMessage({ id, pos, idx, ratio, err: 0.04, permissive }, [pos.buffer, ...(idx ? [idx.buffer] : [])]); });
-    if (!out || out.length < 3 || out.length > before * 0.7) return null;
+    this.busy = { id, job };
+    this.worker.postMessage({
+      id, arr, stride: inter ? inter.data.stride : pa.itemSize, offset: inter ? inter.offset : 0, count: pa.count,
+      normalized: pa.normalized, idx, ratio: job.ratio, err: 0.04, permissive: job.permissive,
+    }, [arr.buffer, ...(idx ? [idx.buffer] : [])]);
+  }
+
+  private finish(job: Job, out: Uint32Array | null): THREE.BufferGeometry | null {
+    const src = job.src;
+    const before = src.getIndex() ? src.getIndex()!.count : src.getAttribute('position').count;
+    if (!out || out.length < 3 || out.length > before * 0.7 || job.owner?.dead) return null;
     const g = new THREE.BufferGeometry();
     for (const [k, a] of Object.entries(src.attributes)) g.setAttribute(k, a);
     g.setIndex(new THREE.BufferAttribute(out, 1));
@@ -192,7 +227,8 @@ export class Culler {
       tmp.copy(e.c0).applyMatrix4(mw);
       const r = e.r0 * mw.getMaxScaleOnAxis();
       const dist = Math.max(0, tmp.distanceTo(cam) - r);
-      const hide = dist > Math.max(d.cullMin, r * d.cullK);
+      // hysteresis (see Prefabs): hidden at the threshold, shown again only 12 % closer
+      const hide = dist > Math.max(d.cullMin, r * d.cullK) * (e.hidden ? 0.88 : 1);
       if (hide !== e.hidden) {
         if (!hide && e.o.layers.mask !== 0) e.mask = e.o.layers.mask; // game changed the layers meanwhile
         e.hidden = hide;
@@ -201,19 +237,27 @@ export class Culler {
       if (!e.heavy || !e.mesh) continue;
       const m = e.mesh;
       if (m.geometry !== e.hi && m.geometry !== e.lo) { e.hi = m.geometry; e.lo = undefined; e.heavy = triangles(m.geometry) >= HEAVY; if (!e.heavy) continue; }
-      const far = !hide && dist > Math.max(2 * d.lod0Min, r * 2 * d.lod0K); // runtime copies: a little later than prefabs
+      const farAt = Math.max(2 * d.lod0Min, r * 2 * d.lod0K) * (m.geometry === e.lo && e.lo ? 0.88 : 1); // runtime copies: later than prefabs
+      const far = !hide && dist > farAt;
       if (far && e.lo === undefined) {
         e.lo = null;
         const hi = e.hi!;
-        void simplifier.get(hi, 0.18).then((g) => { if (e.hi === hi) e.lo = g; });
+        void simplifier.get(hi, 0.18, false, this.owner).then((g) => {
+          if (!g) return;
+          if (this.owner.dead) { disposeLod(g); return; } // map unloaded meanwhile
+          if (e.hi === hi) e.lo = g; else disposeLod(g);
+        });
       }
       const want = far && e.lo ? e.lo : e.hi!;
       if (m.geometry !== want) m.geometry = want;
     }
   }
 
+  private owner = { dead: false };
+
   /** before the root is thrown away: free the far copies (their attributes belong to the full models) */
   dispose() {
+    this.owner.dead = true;
     for (const e of this.ents) {
       if (e.mesh && e.lo && e.mesh.geometry === e.lo && e.hi) e.mesh.geometry = e.hi;
       if (e.lo) disposeLod(e.lo);

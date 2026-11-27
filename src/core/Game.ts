@@ -856,7 +856,6 @@ export class Game {
   private lastRaf = -1;
   private lastFrameT = -1;
   private rafDts: number[] = [];
-  private frameDts: number[] = [];
   private refreshMs = 1000 / 60;
   /** automatic limit in FPS (0 = none) */
   private autoCap = 0;
@@ -877,21 +876,45 @@ export class Game {
     if (cap > 0 && this.lastFrameT >= 0 && t - this.lastFrameT < 1000 / cap - this.refreshMs * 0.5) return; // wait a refresh
     const dtMs = this.lastFrameT < 0 ? this.refreshMs : t - this.lastFrameT;
     this.lastFrameT = t;
-    this.frameDts.push(dtMs);
-    if (this.frameDts.length > 180) this.frameDts.shift();
+    this.winN++; this.winSum += dtMs; if (dtMs > this.winMax) this.winMax = dtMs;
     this.paceTimer += dtMs;
     if (this.paceTimer > 2000) { this.paceTimer = 0; this.updatePacing(); }
     this.frame(dtMs / 1000);
   }
 
+  // automatic limit: decided on 2 s windows of real frames
+  private winN = 0;
+  private winSum = 0;
+  private winMax = 0;
+  private slowWins = 0;
+  private probeT = 0;
+  private probing = false;
+
   private updatePacing() {
+    const n = this.winN, sum = this.winSum, max = this.winMax;
+    this.winN = 0; this.winSum = 0; this.winMax = 0;
     if (this.rafDts.length < 60) return;
     const sorted = [...this.rafDts].sort((a, b) => a - b);
     this.refreshMs = sorted[Math.floor(sorted.length * 0.2)];
     const hz = 1000 / this.refreshMs;
-    if ((this.save?.settings.fpsCap ?? -1) >= 0 || this.state !== 'playing') return;
-    const fps = this.frameDts.length / (this.frameDts.reduce((a, b) => a + b, 0) / 1000);
-    if (!this.autoCap && hz >= 100 && fps < hz * 0.85) this.autoCap = Math.round(hz / 2);
+    if ((this.save?.settings.fpsCap ?? -1) >= 0 || this.state !== 'playing') { this.slowWins = 0; this.probing = false; return; }
+    // a window with a long frame (a map streaming in, the tab coming back) says nothing about the steady rate
+    if (n < 10 || max > 100) return;
+    const fps = n / (sum / 1000);
+    if (this.probing) {
+      // limit lifted for one window to see whether the game keeps up with the screen now
+      this.probing = false;
+      if (fps < hz * 0.9) this.autoCap = Math.round(hz / 2);
+      return;
+    }
+    if (this.autoCap) {
+      // limited: try without the limit every 30 s (the slow spell may have been temporary)
+      this.probeT += 2;
+      if (this.probeT >= 30) { this.probeT = 0; this.autoCap = 0; this.probing = true; }
+      return;
+    }
+    this.slowWins = hz >= 100 && fps < hz * 0.85 ? this.slowWins + 1 : 0;
+    if (this.slowWins >= 3) { this.slowWins = 0; this.probeT = 0; this.autoCap = Math.round(hz / 2); }
   }
 
   private frame(rawDt = this.clock.getDelta()) {
