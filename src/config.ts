@@ -131,8 +131,8 @@ export const QUALITY_PRESETS: Record<Quality, { pixelRatio: number; maxPixels: n
   // maxPixels caps the drawing buffer (CSS px * pixelRatio^2): a 4K / retina laptop would otherwise draw 8+ MP
   // low: no shadow map at all (the player keeps a blob shadow) – the shadow pass drew about half of the triangles
   low: { pixelRatio: 1, maxPixels: 0.9e6, shadows: false, shadowMap: 1024, bloom: false, clouds: 40, grass: 0.35, lod0K: 4, lod0Min: 16, lod0KGood: 3, lod0MinGood: 7, lod1K: 9, lod1Min: 30, shadowDist: 0, cullK: 110, cullMin: 70, spriteK: 8, spriteDensity: 0.3, effects: false, antialias: false },
-  medium: { pixelRatio: 1.25, maxPixels: 1.6e6, shadows: true, shadowMap: 1024, bloom: false, clouds: 70, grass: 0.65, lod0K: 6, lod0Min: 26, lod0KGood: 4.5, lod0MinGood: 10, lod1K: 13, lod1Min: 45, shadowDist: 28, cullK: 170, cullMin: 100, spriteK: 12, spriteDensity: 0.5, effects: false, antialias: true },
-  high: { pixelRatio: 2, maxPixels: 3.6e6, shadows: true, shadowMap: 2048, bloom: true, clouds: 140, grass: 1, lod0K: 10, lod0Min: 45, lod0KGood: 7, lod0MinGood: 18, lod1K: 22, lod1Min: 80, shadowDist: 40, cullK: 280, cullMin: 170, spriteK: 18, spriteDensity: 0.75, effects: true, antialias: true },
+  medium: { pixelRatio: 1.25, maxPixels: 1.6e6, shadows: true, shadowMap: 1024, bloom: false, clouds: 70, grass: 0.65, lod0K: 6, lod0Min: 26, lod0KGood: 4.5, lod0MinGood: 10, lod1K: 13, lod1Min: 45, shadowDist: 55, cullK: 170, cullMin: 100, spriteK: 12, spriteDensity: 0.5, effects: false, antialias: true },
+  high: { pixelRatio: 2, maxPixels: 3.6e6, shadows: true, shadowMap: 2048, bloom: true, clouds: 140, grass: 1, lod0K: 10, lod0Min: 45, lod0KGood: 7, lod0MinGood: 18, lod1K: 22, lod1Min: 80, shadowDist: 65, cullK: 280, cullMin: 170, spriteK: 18, spriteDensity: 0.75, effects: true, antialias: true },
 };
 
 /** the level-of-detail part of a quality preset (world/Detail.ts) */

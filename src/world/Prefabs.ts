@@ -79,7 +79,7 @@ export class PrefabSystem {
   group = new THREE.Group();
   batches: Batch[] = [];
   private frame = 0;
-  detail: Detail = { lod0K: 6, lod0Min: 26, lod0KGood: 4.5, lod0MinGood: 10, lod1K: 13, lod1Min: 45, shadowDist: 28, cullK: 170, cullMin: 100, spriteK: 12, spriteDensity: 0.5 };
+  detail: Detail = { lod0K: 6, lod0Min: 26, lod0KGood: 4.5, lod0MinGood: 10, lod1K: 13, lod1Min: 45, shadowDist: 55, cullK: 170, cullMin: 100, spriteK: 12, spriteDensity: 0.5 };
   private dead = false;
   extraMaterials: THREE.Material[] = [];
 

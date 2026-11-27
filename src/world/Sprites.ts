@@ -49,7 +49,10 @@ void main() {
   // seen steeply from above (or below) a billboard is a thin card: dissolve it before that
   vec3 mid = base + vec3(0.0, iSize.y * 0.5, 0.0);
   float elev = (cameraPosition.y - mid.y) / max(1.0, length(cameraPosition.xz - mid.xz));
-  vFade *= elev > 0.0 ? 1.0 - smoothstep(0.42, 0.75, elev) : 1.0 - smoothstep(0.9, 1.4, -elev);
+  // only for props well below / above the camera (the maps under you when high up): the grass and flowers right
+  // next to the player are also seen "steeply" from a camera a few metres up and must not dissolve (c35 bug)
+  float far = smoothstep(15.0, 30.0, abs(cameraPosition.y - mid.y));
+  vFade *= 1.0 - far * (elev > 0.0 ? smoothstep(0.42, 0.75, elev) : smoothstep(0.9, 1.4, -elev));
   vec3 world = base + right * (position.x * iSize.x * grow + sway * iSize.y * 0.06) + vec3(0.0, h * iSize.y * grow, 0.0);
   vUv = vec2(mix(iUv.x, iUv.z, uv.x), mix(iUv.y, iUv.w, uv.y));
   vShade = 0.78 + 0.22 * h;
@@ -175,8 +178,8 @@ export class SpriteSystem {
       const k = this.on[i] ? 1 : 0.9; // hysteresis: a hidden prop comes back 10 % inside the limits (no popping)
       const vis = !(dy > (60 + m.reach * 0.25) * k)
         && !(dy > 18 * k && dy / Math.max(1, hor - m.reach) > 0.8 * k)
-        && !(d > Math.max(30, m.h * D.spriteK) * k)
-        && !(d > 30 * k && m.keep > D.spriteDensity);
+        && !(d > Math.max(45, m.h * D.spriteK) * k)
+        && !(d > 45 * k && m.keep > D.spriteDensity);
       this.on[i] = vis ? 1 : 0;
       if (vis) out.push(i);
     }

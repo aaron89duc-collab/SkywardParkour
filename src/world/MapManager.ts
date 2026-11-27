@@ -340,7 +340,7 @@ export class MapManager {
   }
 
   /** level of detail / draw distances (quality setting) for every loaded map and the ones loaded later */
-  detail: Detail = { lod0K: 6, lod0Min: 26, lod0KGood: 4.5, lod0MinGood: 10, lod1K: 13, lod1Min: 45, shadowDist: 28, cullK: 170, cullMin: 100, spriteK: 12, spriteDensity: 0.5 };
+  detail: Detail = { lod0K: 6, lod0Min: 26, lod0KGood: 4.5, lod0MinGood: 10, lod1K: 13, lod1Min: 45, shadowDist: 55, cullK: 170, cullMin: 100, spriteK: 12, spriteDensity: 0.5 };
   /** set by the game: uploads a new map's textures and compiles its shaders before it is shown */
   prepare: ((group: THREE.Object3D) => Promise<void>) | null = null;
   private fxCuller!: Culler;

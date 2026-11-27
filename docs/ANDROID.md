@@ -53,9 +53,16 @@ The website's main menu offers the APK ("Get the Android app" → a panel with i
 button); it is hidden inside the app itself and on iPhone / iPad. The link is the APK on R2:
 `https://pub-29e673b58966438a92f3f7d2d0c9ef6d.r2.dev/SkywardParkour-latest.apk` (`src/ui/UI.ts`, `APK_URL`).
 Another address: set `VITE_APK_URL` on Vercel; `VITE_APK_URL=off` hides the offer.
-To publish a new version: build with `--bump`, upload `SkywardParkour-latest.apk` to the same R2 bucket under the
-same name (overwrite). The website does not need a new deploy; players who installed it update by installing the
-new file over the old app (same signing key, progress kept).
+To publish a new version in one step: `sudo bash devtools/android/deploy-apk.sh [--pull]`.
+It builds with `--bump`, uploads `SkywardParkour-latest.apk` (overwrite, `no-cache`) and
+`SkywardParkour-<version>-<code>.apk` (kept) to R2, then checks the public link.
+- The first run creates `/root/skyward-android/r2.properties` (chmod 600, not in git). Fill in an R2 API token
+  ("Object Read & Write" for the APK bucket), the account id, the bucket name and the public URL.
+- `--upload-only` uploads the last build again; `--no-upload` only builds.
+- The upload is an S3 PUT signed with AWS SigV4 in python3 (no extra tools).
+
+The website does not need a new deploy. Players who installed the app update by installing the new file over the
+old app (same signing key, progress kept).
 
 ## Building with GitHub Actions (optional)
 `devtools/github/android-apk.yml` does the same on GitHub: create `.github/workflows/android-apk.yml` from it and
