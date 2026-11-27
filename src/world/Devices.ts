@@ -528,14 +528,16 @@ export class DeviceSystem {
 
   /** move a device's colliders to its current pose */
   private place(dv: Device) {
-    const q = dv.rotates ? new THREE.Quaternion().setFromAxisAngle(Y, dv.ang).premultiply(dv.q) : dv.q;
-    const tilt = (dv as unknown as { tiltQ?: THREE.Quaternion }).tiltQ;
-    const qq = tilt ? dv.q.clone().multiply(tilt) : q;
     if (dv.d.t === 'drop' || dv.d.t === 'slide') return; // placed per crate in step() / placed once when built
+    const q = dv.rotates ? _pq.setFromAxisAngle(Y, dv.ang).premultiply(dv.q) : dv.q;
+    const tilt = (dv as unknown as { tiltQ?: THREE.Quaternion }).tiltQ;
+    const qq = tilt ? _pq2.copy(dv.q).multiply(tilt) : q;
+    _R.x = qq.x; _R.y = qq.y; _R.z = qq.z; _R.w = qq.w;
     for (const b of dv.bodies) {
-      const o = b.off.clone().applyQuaternion(qq).add(dv.pos);
-      b.c.setTranslation({ x: o.x, y: o.y, z: o.z });
-      b.c.setRotation({ x: qq.x, y: qq.y, z: qq.z, w: qq.w });
+      const o = _po.copy(b.off).applyQuaternion(qq).add(dv.pos);
+      _T.x = o.x; _T.y = o.y; _T.z = o.z;
+      b.c.setTranslation(_T);
+      b.c.setRotation(_R);
     }
   }
 
@@ -580,7 +582,7 @@ export class DeviceSystem {
       }
       if (dv.d.t !== 'fan' && dv.d.t !== 'lowgrav') continue;
       if (dv.d.t === 'fan' && !dv.active) continue;
-      const [w, h, dd] = dv.d.s ?? [3, 8, 3];
+      const S = dv.d.s ?? FAN_DEF, w = S[0], h = S[1], dd = S[2];
       const l = _v.copy(p).sub(dv.base).applyQuaternion(_q.copy(dv.q).invert());
       if (dv.d.t === 'fan' && dv.d.dir === 'forward') {
         // horizontal fan: the stream runs along local +z, h long, w x dd wide
@@ -675,7 +677,7 @@ export class DeviceSystem {
         }
       } else if (d.t === 'zipline' && airborne) {
         // run / jump into the cable: grab it if the hands are near it
-        const a = dv.base, b = _w.set(...(d.b ?? d.p));
+        const a = dv.base, b = setA(_w, d.b ?? d.p);
         const ab = _v.copy(b).sub(a), L2 = ab.lengthSq();
         const hand = _p.set(p.x, p.y + 2.0, p.z);
         const t = THREE.MathUtils.clamp(_p2.copy(hand).sub(a).dot(ab) / L2, 0, 0.92);
@@ -703,7 +705,7 @@ export class DeviceSystem {
     let best = Infinity;
     for (const dv of this.list) {
       if (dv.d.t !== 'fan' || !dv.active) continue;
-      const [w, h, dd] = dv.d.s ?? [3, 8, 3];
+      const S = dv.d.s ?? FAN_DEF, w = S[0], h = S[1], dd = S[2];
       const l = _v.copy(p).sub(dv.base).applyQuaternion(_q.copy(dv.q).invert());
       const fw = dv.d.dir === 'forward';
       const ex = Math.max(0, Math.abs(l.x) - w / 2), ey = fw ? Math.max(0, -l.y, l.y - dd) : Math.max(0, -l.y, l.y - h), ez = fw ? Math.max(0, -l.z, l.z - h) : Math.max(0, Math.abs(l.z) - dd / 2);
@@ -790,7 +792,7 @@ export class DeviceSystem {
           if (d.sway) { target = max * Math.sin((2 * Math.PI * (t + (d.phase ?? 0))) / d.sway) + (stood ? Math.sign(st.side || 1) * max * 0.4 : 0); rate = 2.5; }
           else if (d.fold) { target = stood && dv.stoodT > d.fold ? max : 0; rate = stood ? 0.6 : 1.0; }
           st.tilt += THREE.MathUtils.clamp(target - st.tilt, -rate * dt, rate * dt);
-          st.tiltQ = _q.clone().setFromAxisAngle(new THREE.Vector3(1, 0, 0), st.tilt);
+          (st.tiltQ ??= new THREE.Quaternion()).setFromAxisAngle(_x, st.tilt);
           dv.group.quaternion.copy(dv.q).multiply(st.tiltQ);
           this.place(dv);
           dv.delta.set(0, 0, 0);
@@ -810,7 +812,7 @@ export class DeviceSystem {
         }
         case 'elevator': {
           // waits at the bottom until stood on, rides up, waits, comes back down
-          const a = dv.base, b = _w.set(...(d.b ?? d.p)), L = a.distanceTo(b), sp = d.speed ?? 2.5, wt = d.wait ?? 2;
+          const a = dv.base, b = setA(_w, d.b ?? d.p), L = a.distanceTo(b), sp = d.speed ?? 2.5, wt = d.wait ?? 2;
           if (dv.st === 0 && (stood && dv.stoodT > 0.4 || dv.active === false)) { dv.st = 1; dv.stT = 0; dv.active = true; }
           dv.stT += dt;
           const dur = Math.max(0.5, (L / sp) * 1.5);
@@ -832,7 +834,8 @@ export class DeviceSystem {
             const live = u < cyc;
             const o = _v.set(0, y, 0).add(dv.base);
             const c = live ? o : _v.set(0, -10000, 0);
-            b.c.setTranslation({ x: c.x, y: c.y - (dv.d.s?.[1] ?? 1) / 2, z: c.z });
+            _T.x = c.x; _T.y = c.y - (dv.d.s?.[1] ?? 1) / 2; _T.z = c.z;
+            b.c.setTranslation(_T);
             const crate = g.children[i];
             if (crate) { crate.position.set(0, y, 0); crate.visible = live; }
           });
@@ -864,10 +867,11 @@ export class DeviceSystem {
           dv.u = THREE.MathUtils.clamp(dv.u + ((dv.want && dv.stT >= (d.delay ?? 0)) ? dt : -dt) / dur, 0, 1);
           const k = smooth(dv.u);
           if (d.tip) {
-            (dv as unknown as { tiltQ: THREE.Quaternion }).tiltQ = new THREE.Quaternion().setFromAxisAngle(_x, -(d.tip * D2R) * (1 - k));
+            const tq = dv as unknown as { tiltQ?: THREE.Quaternion };
+            (tq.tiltQ ??= new THREE.Quaternion()).setFromAxisAngle(_x, -(d.tip * D2R) * (1 - k));
             dv.group.quaternion.copy(dv.q).multiply((dv as unknown as { tiltQ: THREE.Quaternion }).tiltQ);
           } else {
-            const r = d.rise ?? [0, -3, 0];
+            const r = d.rise ?? RISE_DEF;
             dv.pos.copy(dv.base).add(_v.set(r[0], r[1], r[2]).applyQuaternion(dv.q).multiplyScalar(1 - k));
             if (dv.inner) dv.inner.scale.setScalar(0.35 + 0.65 * k);
             dv.group.visible = dv.u > 0.001;
@@ -984,6 +988,12 @@ export class DeviceSystem {
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _p = new THREE.Vector3(), _p2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _x = new THREE.Vector3(1, 0, 0);
+// scratch objects for the per-frame code (no garbage: see docs/PERFORMANCE.md)
+const _pq = new THREE.Quaternion(), _pq2 = new THREE.Quaternion(), _po = new THREE.Vector3();
+const _T = { x: 0, y: 0, z: 0 }, _R = { x: 0, y: 0, z: 0, w: 1 };
+const RISE_DEF: [number, number, number] = [0, -3, 0];
+const FAN_DEF: [number, number, number] = [3, 8, 3];
+const setA = (v: THREE.Vector3, a: ArrayLike<number>) => v.set(a[0], a[1], a[2]);
 const _m = new THREE.Matrix4();
 
 /** a layer of plastic balls seen from above (ball pit surface) */

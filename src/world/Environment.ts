@@ -136,6 +136,8 @@ void main() {
   gl_FragColor = vec4(uColor * a, a);
 }`;
 
+const SH = { axis: new THREE.Vector3(), view: new THREE.Vector3(), top: new THREE.Vector3(), x: new THREE.Vector3(), y: new THREE.Vector3(), z: new THREE.Vector3(), m: new THREE.Matrix4() };
+
 /** Soft volumetric-looking sun beams ("ánh nắng") drifting around the player. */
 export class LightShafts {
   group = new THREE.Group();
@@ -179,24 +181,23 @@ export class LightShafts {
   update(dt: number, time: number, camera: THREE.Camera, focus: THREE.Vector3) {
     this.group.visible = this.enabled;
     if (!this.enabled) return;
-    const axis = SUN_DIR.clone().negate(); // light travel direction
-    const viewDir = new THREE.Vector3();
-    camera.getWorldDirection(viewDir);
+    const axis = SH.axis.copy(SUN_DIR).negate(); // light travel direction
+    const viewDir = camera.getWorldDirection(SH.view);
     const facing = THREE.MathUtils.clamp(viewDir.dot(SUN_DIR) * 0.5 + 0.55, 0.25, 1);
+    const yAxis = SH.y.copy(axis).negate();
     for (const b of this.beams) {
       b.life += dt * b.speed;
       if (b.life >= 1) this.respawn(b);
       const env = Math.sin(b.life * Math.PI);
       b.mat.uniforms.uTime.value = time;
       b.mat.uniforms.uAlpha.value = env * b.base * facing;
-      const top = focus.clone().add(b.offset).addScaledVector(SUN_DIR, 20);
+      const top = SH.top.copy(focus).add(b.offset).addScaledVector(SUN_DIR, 20);
       b.mesh.position.copy(top);
       // orient: local -Y along the light direction, face the camera around that axis
-      const toCam = camera.position.clone().sub(top);
-      const zAxis = toCam.sub(axis.clone().multiplyScalar(toCam.dot(axis))).normalize();
-      const yAxis = axis.clone().negate();
-      const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
-      const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+      const toCam = SH.z.copy(camera.position).sub(top);
+      const zAxis = toCam.addScaledVector(axis, -toCam.dot(axis)).normalize();
+      const xAxis = SH.x.crossVectors(yAxis, zAxis).normalize();
+      const m = SH.m.makeBasis(xAxis, yAxis, zAxis);
       b.mesh.quaternion.setFromRotationMatrix(m);
     }
   }

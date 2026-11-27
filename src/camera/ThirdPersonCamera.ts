@@ -57,6 +57,10 @@ export class ThirdPersonCamera {
     this.shake = Math.min(1, this.shake + amount);
   }
 
+  private holdOut = 0;
+  private shakeT = 0;
+  private goalV = new THREE.Vector3();
+
   snapTo(feet: THREE.Vector3, yaw: number) {
     this.yaw = yaw;
     this.target.set(feet.x, feet.y + CAMERA.targetHeight, feet.z);
@@ -78,7 +82,7 @@ export class ThirdPersonCamera {
     const liftGoal = mode === 'hang' ? 0.35 : 0;
     this.lift += (liftGoal - this.lift) * (1 - Math.exp(-6 * dt));
     gy += this.lift;
-    const goal = new THREE.Vector3(feet.x, gy, feet.z);
+    const goal = this.goalV.set(feet.x, gy, feet.z);
     if (!this.initialized) { this.target.copy(goal); this.initialized = true; }
     const kh = 1 - Math.exp(-CAMERA.followSharpness * dt);
     const kv = 1 - Math.exp(-sharp * dt);
@@ -113,17 +117,21 @@ export class ThirdPersonCamera {
     let allowed = want;
     const hit = this.physics.sphereCast(this.target, this.dir, want, CAMERA.collisionRadius);
     if (hit !== null) allowed = Math.max(0.5, hit - 0.05);
-    if (allowed < this.currentDist) this.currentDist = allowed; // snap in
-    else this.currentDist = Math.min(allowed, this.currentDist + dt * 7); // ease out
+    // snap in (never look through a wall); ease back out only once nothing has been hit for a moment, so a
+    // railing or an edge that the sweep touches every other frame does not make the camera pump in and out
+    if (allowed < this.currentDist - 0.01) { this.currentDist = allowed; this.holdOut = 0.18; }
+    else if ((this.holdOut -= dt) <= 0) this.currentDist = Math.min(allowed, this.currentDist + dt * 7 * Math.min(1, (allowed - this.currentDist) * 2 + 0.25));
     this.desired.copy(this.target).addScaledVector(this.dir, this.currentDist);
     this.camera.position.copy(this.desired);
     this.camera.lookAt(this.target);
     if (this.shake > 0) {
-      const s = this.shake * this.shake * 0.25;
-      this.camera.position.x += (Math.random() - 0.5) * s;
-      this.camera.position.y += (Math.random() - 0.5) * s;
-      this.shake = Math.max(0, this.shake - dt * 2.2);
-    }
+      // a short, smooth thump (not random jitter every frame, which reads as stutter)
+      this.shakeT += dt;
+      const s = this.shake * this.shake * 0.12;
+      this.camera.position.y += Math.sin(this.shakeT * 38) * s;
+      this.camera.position.x += Math.sin(this.shakeT * 27 + 1.3) * s * 0.5;
+      this.shake = Math.max(0, this.shake - dt * 3.2);
+    } else this.shakeT = 0;
   }
 
   /** Cinematic orbit used behind the main menu. */

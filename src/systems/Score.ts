@@ -22,7 +22,7 @@ export type SaveData = {
   mode?: GameMode;
   /** Challenge mode: only records and achievements are kept (never a position or a run in progress) */
   challenge?: ChallengeRecords;
-  settings: { volume: number; quality: Quality | null; sensitivity: number; showFps: boolean; autoCam: boolean | null; music?: number };
+  settings: { volume: number; quality: Quality | null; sensitivity: number; showFps: boolean; autoCam: boolean | null; music?: number; /** 0 = no limit, -1 (or missing) = automatic */ fpsCap?: number };
 };
 
 /** Adventure: as before (continue from conquered maps). Challenge: every run from 0 m, falls must be re-climbed. */
@@ -111,7 +111,8 @@ export class Score {
     if (!this.newRecord && this.runStartBest > 2 && this.runMax > this.runStartBest + 0.5) { this.newRecord = true; beat = true; }
     if (this.runMax > this.best) this.setBest(this.runMax);
     this.lastSave += dt;
-    if (this.lastSave > 5) { this.lastSave = 0; writeSave(this.save); }
+    // writing the save is synchronous (JSON + storage): not too often while playing; pause / hide / finish flush it
+    if (this.lastSave > 20) { this.lastSave = 0; writeSave(this.save); }
     return beat;
   }
 

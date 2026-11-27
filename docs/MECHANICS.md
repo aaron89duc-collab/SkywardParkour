@@ -162,3 +162,11 @@ through `devtools/i18n-content.mjs`; `node devtools/i18n-content.mjs` patches ex
   (`src/core/Budget.ts` breathe()), new shaders compile with `compileAsync`. Dynamic resolution changes at most once
   every 6 s (each change re-allocates the frame buffers). `devtools/out/perfprobe.cjs` prints draw calls, triangles
   and long tasks; `devtools/out/qualityshot.cjs` checks every preset renders (no black frames).
+
+### Kẹt và bám mép (c35)
+- **Khe hẹp hơn thân người** (ví dụ giữa hai container ở Map 003, (−62.9, 402.5, −12.8)):
+  - nhân vật được hai mép đỡ thì tính là **đang đứng** (`Player.inCrevice`), đi hoặc nhảy ra được;
+  - lưới an toàn chung: "trên không" mà đứng yên quá 0,5 s cũng tính là đang đứng.
+- **Bám mép một bệ rồi bệ biến mất** (blink, sàn vỡ…): khi treo, cứ 0,06 s kiểm tra mặt trên của mép; mất là rơi.
+  Thời gian chờ bám lại là 0,25 s, nên vẫn bắt được mép bên dưới.
+- Kiểm thử: `devtools/out/stuckprobe.cjs <map> x y z`, `devtools/out/blinkhang.cjs`.

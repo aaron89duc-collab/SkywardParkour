@@ -3,6 +3,7 @@ import { breathe } from '../core/Budget';
 import { Assets, bakedGeometry } from '../core/Assets';
 import { Physics } from '../core/Physics';
 import type { PrefabData } from './MapTypes';
+import { simplifier, type Detail } from './Detail';
 
 /** Meshy AI models (normalised offline: base at y=0, centred, height = 1). */
 export const PREFAB_FILES: Record<string, string> = {
@@ -53,10 +54,20 @@ const EMISSIVE: Record<string, number> = { wall_neon_signboard: 1.1, street_ligh
 type Batch = {
   id: string;
   lod0: THREE.InstancedMesh;
+  /** from the model file, or a simplified copy of lod0 made in the background */
   lod1: THREE.InstancedMesh | null;
+  /** the same lod1 model for instances near the player: these cast shadows (cheaper than lod0 shadows) */
+  lod1s: THREE.InstancedMesh | null;
+  /** very simple copy (of lod1) for far away */
+  lod2: THREE.InstancedMesh | null;
   matrices: THREE.Matrix4[];
+  /** world bounding-sphere centre / radius of each instance */
   positions: THREE.Vector3[];
   radius: number[];
+  /** lod1 simplified here (texture right): may be used closer than the file's lod1 */
+  good?: boolean;
+  /** what each instance is drawn as: 0 lod0, 1 lod1 + shadow, 2 lod1, 3 lod2, 4 not drawn (255 = not decided yet) */
+  state: Uint8Array;
 };
 
 const tmpM = new THREE.Matrix4();
@@ -66,7 +77,8 @@ export class PrefabSystem {
   group = new THREE.Group();
   batches: Batch[] = [];
   private frame = 0;
-  lodDistance = 80;
+  detail: Detail = { lod0K: 6, lod0Min: 26, lod0KGood: 4.5, lod0MinGood: 10, lod1K: 13, lod1Min: 45, shadowDist: 28, cullK: 170, cullMin: 100, spriteK: 12, spriteDensity: 0.5 };
+  private dead = false;
   extraMaterials: THREE.Material[] = [];
 
   constructor(private assets: Assets, private physics: Physics) {
@@ -114,33 +126,66 @@ export class PrefabSystem {
       lod0.castShadow = true;
       lod0.receiveShadow = true;
       lod0.name = `prefab_${id}`;
-      let lod1: THREE.InstancedMesh | null = null;
-      if (lod1Mesh) {
-        const b = prepare(lod1Mesh);
-        lod1 = new THREE.InstancedMesh(b.g, b.mat, n);
-        lod1.castShadow = false;
-        lod1.receiveShadow = true;
-        lod1.count = 0;
-        this.group.add(lod1);
-      }
       this.group.add(lod0);
-      const batch: Batch = { id, lod0, lod1, matrices: [], positions: [], radius: [] };
+      const batch: Batch = { id, lod0, lod1: null, lod1s: null, lod2: null, matrices: [], positions: [], radius: [], state: new Uint8Array(n).fill(255) };
+      // the lod1 inside the model files often has a broken texture (seams welded by the asset pipeline): a copy
+      // simplified here (texture seams kept) is used when it can be made, the file's lod1 only as a fallback
+      const fileLod1 = lod1Mesh ? prepare(lod1Mesh) : null;
+      (batch as Batch & { fileLod1?: { g: THREE.BufferGeometry; mat: THREE.Material } | null }).fileLod1 = fileLod1;
+      if (!a.g.boundingSphere) a.g.computeBoundingSphere();
+      const bs = a.g.boundingSphere!;
       for (const [i, it] of list.entries()) {
         await breathe();
         const pos = new THREE.Vector3(...it.p);
         const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(it.r));
         const m = new THREE.Matrix4().compose(pos, q, new THREE.Vector3(it.s, it.s, it.s));
         batch.matrices.push(m);
-        batch.positions.push(pos.clone().add(new THREE.Vector3(0, it.s * 0.5, 0)));
-        batch.radius.push(it.s);
+        batch.positions.push(bs.center.clone().applyMatrix4(m));
+        batch.radius.push(bs.radius * it.s);
         lod0.setMatrixAt(i, m);
         if (col && it.col !== false && !it.scenery) this.addCollider(col.positions, col.indices, m);
       }
       lod0.instanceMatrix.needsUpdate = true;
       lod0.computeBoundingSphere();
       this.batches.push(batch);
+      this.farCopies(batch);
     }));
   }
+
+  private inst(b: Batch, g: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[], name: string, shadow: boolean) {
+    const m = new THREE.InstancedMesh(g, mat, b.matrices.length || b.state.length);
+    m.castShadow = shadow;
+    m.receiveShadow = true;
+    m.count = 0;
+    m.name = `${b.lod0.name}_${name}`;
+    this.group.add(m);
+    return m;
+  }
+
+  private setLod1(b: Batch, g: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[]) {
+    b.lod1 = this.inst(b, g, mat, 'lod1', false);
+    b.lod1s = this.inst(b, g, mat, 'lod1s', true);
+    b.state.fill(255);
+  }
+
+  /** simplified copies, made in a worker: lod1 (from lod0; the file's lod1 when that fails), lod2 for far away */
+  private farCopies(b: Batch) {
+    const file = (b as Batch & { fileLod1?: { g: THREE.BufferGeometry; mat: THREE.Material } | null }).fileLod1 ?? null;
+    const two = () => {
+      if (!b.lod1) return;
+      void simplifier.get(b.lod1.geometry, 0.3).then((g) => { if (g && !this.dead) { b.lod2 = this.inst(b, g, b.lod1!.material, 'lod2', false); b.state.fill(255); } });
+    };
+    void simplifier.get(b.lod0.geometry, 0.25).then((g) => {
+      if (this.dead) return;
+      if (g) { this.setLod1(b, g, b.lod0.material); b.good = true; }
+      else if (file) this.setLod1(b, file.g, file.mat);
+      else return;
+      if (g && file) file.g.dispose(); // not needed
+      two();
+    });
+  }
+
+  dispose() { this.dead = true; }
 
   private addCollider(src: Float32Array, idx: Uint32Array, m: THREE.Matrix4) {
     const out = new Float32Array(src.length);
@@ -152,31 +197,47 @@ export class PrefabSystem {
     this.physics.addTrimesh(out, idx);
   }
 
-  /** Re-assign instances between LOD0/LOD1 based on camera distance. */
+  /**
+   * Re-assign instances between lod0 / lod1 / lod2 / not drawn by camera distance and size. The instance buffers are
+   * uploaded again only when something changed (they used to be re-sent five times a second: a steady hitch).
+   */
   private lastUpdate = -1;
   private lastCam = new THREE.Vector3(1e9, 0, 0);
 
   update(camPos: THREE.Vector3, force = false) {
     const now = performance.now();
-    const jumped = camPos.distanceToSquared(this.lastCam) > 15 * 15;
+    const jumped = camPos.distanceToSquared(this.lastCam) > 8 * 8;
     if (!force && !jumped && now - this.lastUpdate < 200) return;
     this.lastUpdate = now;
     this.lastCam.copy(camPos);
     this.frame++;
+    const D = this.detail;
     for (const b of this.batches) {
-      if (!b.lod1) continue;
-      let n0 = 0, n1 = 0;
-      for (let i = 0; i < b.matrices.length; i++) {
-        const d = camPos.distanceTo(b.positions[i]) - b.radius[i] * 0.6;
-        if (d < this.lodDistance) b.lod0.setMatrixAt(n0++, b.matrices[i]);
-        else b.lod1.setMatrixAt(n1++, b.matrices[i]);
+      let changed = force;
+      const n = b.matrices.length;
+      for (let i = 0; i < n; i++) {
+        const r = b.radius[i];
+        const d = Math.max(0, camPos.distanceTo(b.positions[i]) - r);
+        let st: number;
+        if (d > Math.max(D.cullMin, r * D.cullK)) st = 4;
+        else if (d < (b.good ? Math.max(D.lod0MinGood, r * D.lod0KGood) : Math.max(D.lod0Min, r * D.lod0K)) || !b.lod1) st = 0;
+        else if (d < Math.max(D.lod1Min, r * D.lod1K) || !b.lod2) st = d < D.shadowDist ? 1 : 2;
+        else st = 3;
+        if (b.state[i] !== st) { b.state[i] = st; changed = true; }
       }
-      b.lod0.count = n0;
-      b.lod1.count = n1;
-      b.lod0.instanceMatrix.needsUpdate = true;
-      b.lod1.instanceMatrix.needsUpdate = true;
-      b.lod0.computeBoundingSphere();
-      b.lod1.computeBoundingSphere();
+      if (!changed) continue;
+      const meshes = [b.lod0, b.lod1s, b.lod1, b.lod2];
+      const cnt = [0, 0, 0, 0];
+      for (let i = 0; i < n; i++) {
+        const st = b.state[i];
+        if (st < 4) meshes[st]!.setMatrixAt(cnt[st]++, b.matrices[i]);
+      }
+      for (let k = 0; k < 4; k++) {
+        const m = meshes[k];
+        if (!m) continue;
+        m.count = cnt[k];
+        if (cnt[k] > 0) { m.instanceMatrix.needsUpdate = true; m.computeBoundingSphere(); }
+      }
     }
   }
 

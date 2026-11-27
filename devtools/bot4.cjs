@@ -36,6 +36,8 @@ const fs = require('fs');
     for (const m of g.maps.loaded.values()) for (const mv of m.movers.movers) movers[mv.data.id] = mv;
     const devs = {};
     for (const m of g.maps.loaded.values()) for (const dv of m.devices?.list ?? []) devs[dv.data.id] = dv;
+    // device ids repeat between maps (t22 in Map 006 and Map 007): the map being tested (the one the player starts in) wins
+    { const here = g.maps.mapAt(routes.main[0].p[0], routes.main[0].p[1], routes.main[0].p[2]); const own = here && g.maps.loaded.get(here.id); if (own) for (const dv of own.devices?.list ?? []) devs[dv.data.id] = dv; } // own map wins
     const resetDevices = () => { for (const m of g.maps.loaded.values()) m.devices?.reset(sim); };
     const events = [];
     let segPad = false, segBounce = 0, segLaunch = false, segZip = false;

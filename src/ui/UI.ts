@@ -31,6 +31,7 @@ export type UIHandlers = {
   onQuality: (q: Quality) => void;
   onSensitivity: (v: number) => void;
   onShowFps: (v: boolean) => void;
+  onFpsCap: (v: number) => void;
   onAutoCam: (v: boolean) => void;
   onPause: () => void;
   onClick: () => void;
@@ -249,9 +250,8 @@ export class UI {
           <button class="btn mode ${info.mode === 'adventure' ? 'last' : ''}" data-mode="adventure"><b>${t('menu.adventure')}</b><span>${t('menu.adventureSub')}</span></button>
           <button class="btn mode challenge ${info.mode === 'challenge' ? 'last' : ''}" data-mode="challenge"><b>${t('menu.challenge')}</b><span>${t('menu.challengeSub')}</span></button>
         </div>
-        ${info.continueFrom.map((c) => `<button class="btn secondary city" data-cont="${c.id}">${t('menu.continue', { name: esc(c.name), y: Math.round(c.y) })}</button>`).join('')}
         ${this.touch && isIOS() && !isStandalone() ? `<div class="ios-tip">${t('menu.ios')}</div>` : ''}
-        <div class="row"><button class="btn secondary" data-a="maps">${t('menu.maps')}</button><button class="btn secondary" data-a="lb">${t('menu.leaderboard')}</button><button class="btn secondary" data-a="ach">${t('menu.achievements')} ${info.achievements.got}/${info.achievements.total}</button><button class="btn secondary" data-a="settings">${t('menu.settings')}</button></div>
+        <div class="row"><button class="btn secondary" data-a="maps">${t('menu.maps')}</button><button class="btn secondary" data-a="lb">${t('menu.leaderboard')}</button><button class="btn secondary" data-a="settings">${t('menu.settings')}</button></div>
         <div class="stats">
           <div class="stat"><b>${best.toFixed(0)} m</b><span>${t('menu.bestAdventure')}</span></div>
           <div class="stat"><b>${info.challengeBest.toFixed(0)} m</b><span>${t('menu.bestChallenge')}</span></div>
@@ -269,8 +269,6 @@ export class UI {
       }),
     );
     this.menu.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => b.addEventListener('click', () => { this.h.onClick(); this.h.onStart(undefined, b.dataset.mode as GameMode); }));
-    this.menu.querySelectorAll<HTMLButtonElement>('[data-cont]').forEach((b) => b.addEventListener('click', () => { this.h.onClick(); this.h.onStart(b.dataset.cont, 'adventure'); }));
-    this.menu.querySelector('[data-a=ach]')?.addEventListener('click', () => { this.h.onClick(); this.h.onAchievements?.(); });
     this.menu.querySelector('[data-a=maps]')?.addEventListener('click', () => { this.h.onClick(); this.online?.openMaps(); });
     this.menu.querySelector('[data-a=lb]')?.addEventListener('click', () => { this.h.onClick(); this.online?.openLeaderboard(); });
     this.menu.querySelector('[data-a=apk]')?.addEventListener('click', () => { this.h.onClick(); this.openApk(); });
@@ -340,15 +338,21 @@ export class UI {
   /** admin test run: nothing is being recorded */
   setTestBadge(on: boolean) { (this.hud.querySelector('.test-badge') as HTMLElement).classList.toggle('hidden', !on); }
 
+  // the HUD is rewritten only where something changed (DOM writes force style / layout work in the browser)
+  private hudCache: Record<string, string> = {};
+  private hudSet(key: string, v: string, apply: (v: string) => void) { if (this.hudCache[key] !== v) { this.hudCache[key] = v; apply(v); } }
+
   updateHUD(s: { current: number; runMax: number; best: number; time: number; zone: ZoneData | null; fps?: number }) {
-    this.hudCur.innerHTML = `${s.current.toFixed(0)}<small>m</small>`;
-    this.hudLines.innerHTML = `${t('hud.runBest')}: <b>${s.runMax.toFixed(0)} m</b><br>${t('hud.personalBest')}: <b>${s.best.toFixed(0)} m</b><br>${t('hud.time')}: ${fmtTime(s.time)}`;
+    this.hudSet('cur', s.current.toFixed(0), (v) => { this.hudCur.innerHTML = `${v}<small>m</small>`; });
+    this.hudSet('lines', `${s.runMax.toFixed(0)}|${s.best.toFixed(0)}|${fmtTime(s.time)}|${t('hud.runBest')}`, () => {
+      this.hudLines.innerHTML = `${t('hud.runBest')}: <b>${s.runMax.toFixed(0)} m</b><br>${t('hud.personalBest')}: <b>${s.best.toFixed(0)} m</b><br>${t('hud.time')}: ${fmtTime(s.time)}`;
+    });
     if (s.zone && s.zone !== this.hudZoneData) { this.hudZoneData = s.zone; this.setZoneLabel(s.zone); }
-    const pct = (v: number) => `${Math.max(0, Math.min(100, ((v - this.mapY0) / this.mapHeight) * 100))}%`;
-    this.altMe.style.bottom = pct(s.current);
-    this.altMax.style.bottom = pct(s.runMax);
-    this.updatePB(s.best);
-    if (s.fps !== undefined) { this.fps.classList.remove('hidden'); this.fps.textContent = `${s.fps.toFixed(0)} FPS`; } else this.fps.classList.add('hidden');
+    const pct = (v: number) => `${Math.max(0, Math.min(100, ((v - this.mapY0) / this.mapHeight) * 100)).toFixed(1)}%`;
+    this.hudSet('me', pct(s.current), (v) => { this.altMe.style.bottom = v; });
+    this.hudSet('max', pct(s.runMax), (v) => { this.altMax.style.bottom = v; });
+    this.hudSet('pb', `${s.best.toFixed(1)}|${this.mapY0}|${this.mapHeight}`, () => this.updatePB(s.best));
+    this.hudSet('fps', s.fps !== undefined ? `${s.fps.toFixed(0)} FPS` : '', (v) => { this.fps.classList.toggle('hidden', !v); this.fps.textContent = v; });
   }
 
   setHint(text: string | null) {
@@ -357,7 +361,7 @@ export class UI {
     this.hint.classList.remove('hidden');
   }
 
-  setSpeedLines(k: number) { this.speed.style.opacity = `${Math.min(1, k)}`; }
+  setSpeedLines(k: number) { this.hudSet('speed', Math.min(1, k).toFixed(2), (v) => { this.speed.style.opacity = v; }); }
 
   toast(t1: string, t2 = '', gold = false, ms = 2600) {
     (this.toastEl.querySelector('.t1') as HTMLElement).textContent = t1;
@@ -412,6 +416,7 @@ export class UI {
         <button data-v="low" class="${q === 'low' ? 'on' : ''}">${t('set.low')}</button><button data-v="medium" class="${q === 'medium' ? 'on' : ''}">${t('set.medium')}</button><button data-v="high" class="${q === 'high' ? 'on' : ''}">${t('set.high')}</button></div></div>
       <div class="set-row"><span>${t('set.sens')}</span><input type="range" min="0.4" max="2" step="0.1" value="${s.sensitivity}" data-k="sens"></div>
       <div class="set-row"><span>${t('set.autocam')}</span><input type="checkbox" ${(s.autoCam ?? this.touch) ? 'checked' : ''} data-k="autocam"></div>
+      <div class="set-row"><span>${t('set.fpsCap')}</span><div class="seg" data-k="cap">${[[-1, t('set.fpsAuto')], [30, '30'], [60, '60'], [0, t('set.fpsMax')]].map(([v, l]) => `<button data-v="${v}" class="${(s.fpsCap ?? -1) === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="set-row"><span>${t('set.fps')}</span><input type="checkbox" ${s.showFps ? 'checked' : ''} data-k="fps"></div>
       <div class="note">${t('set.signsNote')}</div>
       <div class="stack" style="margin-top:14px"><button class="btn" data-a="back">${t('common.done')}</button></div></div>`;
@@ -420,6 +425,13 @@ export class UI {
     (this.settings.querySelector('[data-k=sens]') as HTMLInputElement).addEventListener('input', (e) => this.h.onSensitivity(parseFloat((e.target as HTMLInputElement).value)));
     (this.settings.querySelector('[data-k=fps]') as HTMLInputElement).addEventListener('change', (e) => this.h.onShowFps((e.target as HTMLInputElement).checked));
     (this.settings.querySelector('[data-k=autocam]') as HTMLInputElement).addEventListener('change', (e) => this.h.onAutoCam((e.target as HTMLInputElement).checked));
+    this.settings.querySelectorAll<HTMLButtonElement>('[data-k=cap] button').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.h.onClick();
+        this.settings.querySelectorAll('[data-k=cap] button').forEach((x) => x.classList.toggle('on', x === b));
+        this.h.onFpsCap(Number(b.dataset.v));
+      }),
+    );
     this.settings.querySelectorAll<HTMLButtonElement>('[data-k=lang] button').forEach((b) =>
       b.addEventListener('click', () => { this.h.onClick(); setLang(b.dataset.v as 'en' | 'vi'); }),
     );

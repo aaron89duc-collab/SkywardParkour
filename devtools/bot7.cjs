@@ -26,6 +26,7 @@ const fs = require('fs');
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const page = await browser.newPage({ viewport: { width: 320, height: 200 } });
   page.on('pageerror', (e) => console.log('pageerror', e.message));
+  if (process.env.FLAGS) await page.addInitScript((f) => { for (const k of f.split(',')) globalThis[k] = true; }, process.env.FLAGS); // __FLAGS
   await page.goto('http://127.0.0.1:5173/');
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 240000 });
   await page.evaluate(async (MAP) => { const g = window.__game; g.renderer.setAnimationLoop(null); await g.loadOtherMaps(MAP || undefined); }, MAP);
@@ -38,6 +39,8 @@ const fs = require('fs');
     for (const m of g.maps.loaded.values()) for (const mv of m.movers.movers) movers[mv.data.id] = mv;
     const devs = {};
     for (const m of g.maps.loaded.values()) for (const dv of m.devices?.list ?? []) devs[dv.data.id] = dv;
+    // device ids repeat between maps (t22 in Map 006 and Map 007): the map being tested (the one the player starts in) wins
+    { const here = g.maps.mapAt(routes.main[0].p[0], routes.main[0].p[1], routes.main[0].p[2]); const own = here && g.maps.loaded.get(here.id); if (own) for (const dv of own.devices?.list ?? []) devs[dv.data.id] = dv; } // own map wins
     const resetDevices = () => { for (const m of g.maps.loaded.values()) m.devices?.reset(sim); };
     const events = [];
     let segPad = false, segBounce = 0, segLaunch = false, segZip = false, segSlide = false;

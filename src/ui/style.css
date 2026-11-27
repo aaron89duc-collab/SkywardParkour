@@ -209,6 +209,10 @@ kbd { font-family: var(--font); background: rgba(255,255,255,.18); border-radius
 .lb-row .v { font-weight: 800; color: var(--gold); }
 .lb-row.me { background: rgba(255, 209, 102, .22); outline: 1px solid rgba(255, 209, 102, .6); }
 .lb-empty { text-align: center; padding: 22px 8px; opacity: .85; font-size: 14px; line-height: 1.5; }
+.lb-sep { text-align: center; opacity: .5; line-height: 1; margin: 2px 0; }
+.lb-me { text-align: center; font-size: 14px; margin-top: 10px; opacity: .9; }
+.lb-me i { font-style: normal; opacity: .55; font-size: 12px; }
+.map-row .mr-play { flex: 0 0 auto; padding: 8px 16px; min-width: 0; font-size: 14px; }
 .lb-foot { text-align: center; font-size: 12px; opacity: .75; margin-top: 8px; }
 @media (max-height: 520px) {
   .player-chip { margin-top: 4px; font-size: 12px; padding: 3px 10px; }
@@ -251,6 +255,7 @@ kbd { font-family: var(--font); background: rgba(255,255,255,.18); border-radius
 /* maps list (no download state) */
 .mr-no { flex: none; width: 34px; font-weight: 900; font-size: 13px; opacity: .55; letter-spacing: .5px; }
 .mr-tag { display: inline-block; margin-top: 5px; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 8px; }
+.mr-tag:not(.ok):not(.soon) { background: rgba(120, 190, 255, .18); color: #9fd3ff; }
 .mr-tag.ok { background: rgba(107, 227, 140, .18); color: #8ff0a8; }
 .mr-tag.soon { background: rgba(255, 209, 102, .16); color: var(--gold); }
 

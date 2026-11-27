@@ -407,12 +407,13 @@ export class MoverSystem {
     return c ? this.byHandle.get(c.handle) ?? null : null;
   }
 
-  /** Advance all platforms to simulation time t and refresh the query pipeline. */
+  /** Advance all platforms to simulation time t. The query pipeline is refreshed once for all maps by the caller. */
   step(t: number, dt: number) {
     if (!this.movers.length) return;
     for (const m of this.movers) m.step(t, dt);
-    this.physics.world.updateSceneQueries();
   }
+
+  get count() { return this.movers.length; }
 
   reset(t: number) {
     for (const m of this.movers) m.reset(t);

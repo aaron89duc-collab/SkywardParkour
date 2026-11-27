@@ -182,6 +182,7 @@ export class TouchControls {
   }
 
   setHanging(h: boolean) {
+    if (this.hanging === h) return; // called every frame: touch the DOM only when it changes
     this.hanging = h;
     if (this.fly) return;
     this.labelButtons();

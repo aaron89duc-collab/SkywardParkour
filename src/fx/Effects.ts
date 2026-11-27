@@ -75,6 +75,7 @@ void main() {
   gl_FragColor = vec4(uColor * a, a);
 }`;
 
+const SPAWN_AT = new THREE.Vector3();
 type Particle = { p: THREE.Vector3; v: THREE.Vector3; life: number; max: number; size: number; grow: number; color: THREE.Color; drag: number; gravity: number };
 
 /** Pooled soft particles (dust, spray, sparkles). */
@@ -112,47 +113,65 @@ export class Particles {
     (this.points.material as THREE.ShaderMaterial).uniforms.uScale.value = h * 0.5;
   }
 
+  // particles are recycled (no garbage per frame: allocations made the browser's garbage collector stall the game)
+  private free: Particle[] = [];
+  private colorCache = new Map<THREE.ColorRepresentation, THREE.Color>();
+
   emit(at: THREE.Vector3, n: number, o: { speed?: number; up?: number; life?: number; size?: number; grow?: number; color?: THREE.ColorRepresentation; spread?: number; drag?: number; gravity?: number }) {
+    const key = o.color ?? '#e8dcc4';
+    let c = this.colorCache.get(key);
+    if (!c) { c = new THREE.Color(key); this.colorCache.set(key, c); }
     for (let i = 0; i < n; i++) {
-      if (this.parts.length >= this.max) this.parts.shift();
+      let q: Particle;
+      if (this.parts.length >= this.max) { q = this.parts[0]; this.parts[0] = this.parts[this.parts.length - 1]; this.parts.pop(); }
+      else q = this.free.pop() ?? { p: new THREE.Vector3(), v: new THREE.Vector3(), life: 0, max: 1, size: 1, grow: 0, color: new THREE.Color(), drag: 0, gravity: 0 };
       const a = Math.random() * Math.PI * 2;
       const sp = (o.speed ?? 2) * (0.4 + Math.random() * 0.6);
       const spread = o.spread ?? 0.3;
-      this.parts.push({
-        p: at.clone().add(new THREE.Vector3((Math.random() - 0.5) * spread, Math.random() * 0.1, (Math.random() - 0.5) * spread)),
-        v: new THREE.Vector3(Math.cos(a) * sp, (o.up ?? 0.5) * (0.5 + Math.random()), Math.sin(a) * sp),
-        life: 0,
-        max: (o.life ?? 0.7) * (0.7 + Math.random() * 0.6),
-        size: (o.size ?? 0.5) * (0.7 + Math.random() * 0.6),
-        grow: o.grow ?? 1.2,
-        color: new THREE.Color(o.color ?? '#e8dcc4'),
-        drag: o.drag ?? 3,
-        gravity: o.gravity ?? 0,
-      });
+      q.p.set(at.x + (Math.random() - 0.5) * spread, at.y + Math.random() * 0.1, at.z + (Math.random() - 0.5) * spread);
+      q.v.set(Math.cos(a) * sp, (o.up ?? 0.5) * (0.5 + Math.random()), Math.sin(a) * sp);
+      q.life = 0;
+      q.max = (o.life ?? 0.7) * (0.7 + Math.random() * 0.6);
+      q.size = (o.size ?? 0.5) * (0.7 + Math.random() * 0.6);
+      q.grow = o.grow ?? 1.2;
+      q.color.copy(c);
+      q.drag = o.drag ?? 3;
+      q.gravity = o.gravity ?? 0;
+      this.parts.push(q);
     }
   }
 
+  private drawn = -1;
   update(dt: number) {
-    let n = 0;
-    for (let i = this.parts.length - 1; i >= 0; i--) {
-      const q = this.parts[i];
+    const parts = this.parts;
+    // drop dead ones (swap-remove: order does not matter for additive / soft puffs)
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const q = parts[i];
       q.life += dt;
-      if (q.life >= q.max) { this.parts.splice(i, 1); continue; }
+      if (q.life >= q.max) { parts[i] = parts[parts.length - 1]; parts.pop(); this.free.push(q); }
     }
-    for (const q of this.parts) {
+    const n = parts.length;
+    if (n === 0 && this.drawn === 0) return; // nothing to send to the GPU
+    const pos = this.pos, col = this.col, size = this.size;
+    for (let i = 0; i < n; i++) {
+      const q = parts[i];
       q.v.multiplyScalar(Math.exp(-q.drag * dt));
       q.v.y -= q.gravity * dt;
       q.p.addScaledVector(q.v, dt);
       const k = q.life / q.max;
-      this.pos.set([q.p.x, q.p.y, q.p.z], n * 3);
-      this.col.set([q.color.r, q.color.g, q.color.b, (1 - k) * Math.min(1, k * 6) * 0.85], n * 4);
-      this.size[n] = q.size * (1 + k * q.grow);
-      n++;
+      pos[i * 3] = q.p.x; pos[i * 3 + 1] = q.p.y; pos[i * 3 + 2] = q.p.z;
+      col[i * 4] = q.color.r; col[i * 4 + 1] = q.color.g; col[i * 4 + 2] = q.color.b; col[i * 4 + 3] = (1 - k) * Math.min(1, k * 6) * 0.85;
+      size[i] = q.size * (1 + k * q.grow);
     }
+    this.drawn = n;
     this.geo.setDrawRange(0, n);
-    (this.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-    (this.geo.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-    (this.geo.attributes.size as THREE.BufferAttribute).needsUpdate = true;
+    const a = this.geo.attributes;
+    for (const name of ['position', 'color', 'size']) {
+      const b = a[name] as THREE.BufferAttribute;
+      b.clearUpdateRanges();
+      if (n > 0) b.addUpdateRange(0, n * b.itemSize);
+      b.needsUpdate = true;
+    }
   }
 }
 
@@ -456,7 +475,7 @@ export class Effects {
       sp.acc += dt * sp.rate;
       while (sp.acc >= 1) {
         sp.acc -= 1;
-        const at = sp.p.clone().add(new THREE.Vector3((Math.random() - 0.5) * sp.r * 2, (Math.random() - 0.5) * sp.r, (Math.random() - 0.5) * sp.r * 2));
+        const at = SPAWN_AT.set(sp.p.x + (Math.random() - 0.5) * sp.r * 2, sp.p.y + (Math.random() - 0.5) * sp.r, sp.p.z + (Math.random() - 0.5) * sp.r * 2);
         if (sp.kind === 'mist') this.dust.emit(at, 1, { speed: 0.6, up: 0.6, life: 2.2, size: 1.6 + sp.r * 0.5, grow: 1.8, color: '#f4fbff', drag: 0.6 });
         else this.sparkles.emit(at, 1, { speed: 0.25, up: 0.9, life: 1.8, size: 0.25, grow: -0.5, color: '#9fe8ff', drag: 0.3 });
       }

@@ -139,14 +139,38 @@ export class AudioEngine {
   }
 
   /** height: metres, fallSpeed: m/s downward */
+  // parameter changes are sent ~12 times a second, not every frame: each one is an automation event the audio
+  // thread has to process (60 a second per parameter piled up work there and on the main thread)
+  private paramT = 0;
+  private sent = new Map<AudioParam, number>();
+  private setParam(p: AudioParam, v: number, tc: number, eps: number) {
+    const was = this.sent.get(p);
+    if (was !== undefined && Math.abs(was - v) < eps) return;
+    this.sent.set(p, v);
+    p.setTargetAtTime(v, this.ctx!.currentTime, tc);
+  }
+
   update(dt: number, height: number, fallSpeed: number, time: number) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime;
+    this.paramT -= dt;
+    const doParams = this.paramT <= 0;
+    if (doParams) this.paramT = 0.08;
+    if (!doParams) { this.tickShots(dt); this.scheduleMusic(); return; }
     const h = Math.min(1, height / 200), wk = this.profile.wind ?? 1;
     const gust = 0.5 + 0.5 * Math.sin(time * 0.37) * Math.sin(time * 0.13 + 1);
     const g = (0.025 + h * 0.07 + gust * 0.02 * (0.3 + h)) * wk + Math.min(0.25, Math.max(0, fallSpeed - 8) * 0.012);
-    this.windGain.gain.setTargetAtTime(g, t, 0.25);
-    this.windFilter.frequency.setTargetAtTime(300 + h * 300 + gust * 150 + Math.max(0, fallSpeed - 8) * 30, t, 0.3);
+    this.setParam(this.windGain.gain, g, 0.25, 0.002);
+    this.setParam(this.windFilter.frequency, 300 + h * 300 + gust * 150 + Math.max(0, fallSpeed - 8) * 30, 0.3, 8);
+    this.tickShots(dt);
+    this.scheduleMusic();
+  }
+
+  private shotDt = 0;
+  private tickShots(dt: number) {
+    this.shotDt += dt;
+    if (this.shotDt < 0.08) return;
+    dt = this.shotDt;
+    this.shotDt = 0;
     // ambient one-shots
     for (const [k, left] of this.timers) {
       const f = SHOTS[k];
@@ -155,19 +179,18 @@ export class AudioEngine {
       if (l > 0) { this.timers.set(k, l); continue; }
       this.timers.set(k, f(this));
     }
-    this.scheduleMusic();
   }
 
   /** sliding / zipline friction: 0 = silent, speed in m/s */
   rubbing(speed: number) {
     if (!this.ctx || !this.rub) return;
-    const t = this.ctx.currentTime, k = Math.min(1, speed / 12);
-    this.rub.g.gain.setTargetAtTime(speed > 0.5 ? 0.04 + k * 0.09 : 0, t, 0.08);
-    this.rub.f.frequency.setTargetAtTime(500 + k * 900, t, 0.1);
+    const k = Math.min(1, speed / 12);
+    this.setParam(this.rub.g.gain, speed > 0.5 ? 0.04 + k * 0.09 : 0, 0.08, 0.004);
+    this.setParam(this.rub.f.frequency, 500 + k * 900, 0.1, 20);
   }
 
   /** a fan blowing nearby: 0..1 */
-  fan(k: number) { if (this.ctx && this.hum) this.hum.gain.setTargetAtTime(k * 0.1, this.ctx.currentTime, 0.15); }
+  fan(k: number) { if (this.ctx && this.hum) this.setParam(this.hum.gain, k * 0.1, 0.15, 0.003); }
 
   // ------------------------------------------------------------------ building blocks
   private env(g: GainNode, t: number, a: number, peak: number, dcy: number) {

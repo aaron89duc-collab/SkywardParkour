@@ -4,7 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { PHYS, QUALITY_PRESETS, detectDefaultQuality, lowerQuality, minQuality, type Quality } from '../config';
+import { PHYS, QUALITY_PRESETS, detailOf, detectDefaultQuality, lowerQuality, minQuality, type Quality } from '../config';
 import { Physics } from './Physics';
 import { Assets } from './Assets';
 import { Input } from '../input/Input';
@@ -18,6 +18,7 @@ import { MapManager } from '../world/MapManager';
 import type { MapData, ZoneData } from '../world/MapTypes';
 import { Effects } from '../fx/Effects';
 import { installHeightFog } from '../world/HeightFog';
+import { tuneMaterials } from '../world/Detail';
 import { UI } from '../ui/UI';
 import { AudioEngine } from '../systems/Audio';
 import { Score, loadSave, writeSave, challengeOf, type SaveData, type GameMode } from '../systems/Score';
@@ -33,6 +34,8 @@ import { t, loc, onLang } from '../i18n';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'finished';
 type CharId = 'male' | 'female';
+
+const TMP_V = new THREE.Vector3();
 
 export class Game {
   renderer!: THREE.WebGLRenderer;
@@ -63,6 +66,8 @@ export class Game {
   private time = 0;
   private hudTimer = 0;
   private fpsAvg = 60;
+  private fpsFrames = 0;
+  private fpsTime = 0;
   private reachedMilestones = new Set<number>();
   private reachedZones = new Set<string>();
   private finishedMaps = new Set<string>();
@@ -110,6 +115,7 @@ export class Game {
       onQuality: (q) => { this.applyQuality(q); this.save.settings.quality = q; writeSave(this.save); },
       onSensitivity: (v) => { this.sensitivity = v; this.save.settings.sensitivity = v; writeSave(this.save); },
       onShowFps: (v) => { this.save.settings.showFps = v; writeSave(this.save); },
+      onFpsCap: (v) => { this.save.settings.fpsCap = v; this.autoCap = 0; writeSave(this.save); },
       onAutoCam: (v) => { this.save.settings.autoCam = v; this.cam.autoFollow = v; writeSave(this.save); },
       onPause: () => this.pause(),
       onClick: () => { this.audio.init(); this.audio.click(); },
@@ -143,6 +149,9 @@ export class Game {
     if (this.isTouch) this.touch = new TouchControls(this.input, this.container);
 
     this.env = new Environment(this.scene, this.renderer, { shadows: preset.shadows, shadowMap: preset.shadowMap, flare: this.quality !== 'low' });
+    // decoration only on high, from the very start (applyQuality is only called when the setting changes)
+    this.env.shafts.enabled = preset.effects;
+    if (this.env.flare) this.env.flare.visible = preset.effects;
     this.clouds = new Clouds(this.scene, preset.clouds);
     this.fx = new Effects(this.scene);
     this.fx.addBirds(3);
@@ -150,6 +159,7 @@ export class Game {
     this.fx.sparkles.setViewport(window.innerHeight);
 
     this.maps = new MapManager(this.assets, this.physics, this.scene, this.fx);
+    this.maps.prepare = (g) => this.prepareObjects(g);
     this.ui.setLoading(0.05, t('load.build', { name: 'Starter Village' }));
     // no network needed here: the app's own maps + whatever was downloaded before
     await this.content.init();
@@ -159,7 +169,7 @@ export class Game {
     this.maps.setRegistry(this.content.entries());
     await this.maps.load(this.maps.registry[0]);
     this.map = this.maps.primary!;
-    this.maps.setLodDistance(preset.lodDistance);
+    this.maps.setDetail(detailOf(preset));
 
     this.player = new Player(this.physics, this.scene);
     this.player.hooks = this.maps;
@@ -177,11 +187,13 @@ export class Game {
     this.setupComposer(preset.bloom);
     this.setHudMap(this.map);
     this.dropShadow = this.makeDropShadow();
+    tuneMaterials(this.scene);
     window.addEventListener('resize', () => this.onResize());
     window.visualViewport?.addEventListener('resize', () => this.onResize());
     document.addEventListener('fullscreenchange', () => setTimeout(() => this.onResize(), 50));
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); this.score.flush(); });
     window.addEventListener('beforeunload', () => this.score.flush());
+    window.addEventListener('pagehide', () => this.score.flush());
 
     // warm-up render so shaders compile before the menu appears
     this.cam.yaw = 0.5;
@@ -214,7 +226,7 @@ export class Game {
     if (!this.lb.hasName) { this.ui.online!.onNameSet = () => { this.ui.refreshMaps(); void this.lb.sync(); }; this.ui.online!.openName(true); }
     else void this.lb.sync();
     this.clock.start();
-    this.renderer.setAnimationLoop(() => this.frame());
+    this.renderer.setAnimationLoop((t: number) => this.tick(t));
     (window as unknown as { __game: Game }).__game = this;
     // the city above the clouds streams in behind the menu (seamless world: it is visible from the village)
     this.startDevPacks();
@@ -249,7 +261,7 @@ export class Game {
         try { await this.maps.load(e); added = true; } catch (err) { console.warn('map load failed', e.id, err); }
       }
       if (added) {
-        this.maps.setLodDistance(QUALITY_PRESETS[this.quality].lodDistance);
+        this.maps.setDetail(detailOf(QUALITY_PRESETS[this.quality]));
         // compile the new shaders in the background where the browser can (no frame-long stall)
         const r = this.renderer as THREE.WebGLRenderer & { compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<unknown> };
         if (r.compileAsync) await r.compileAsync(this.scene, this.cam.camera).catch(() => undefined); else this.renderer.compile(this.scene, this.cam.camera);
@@ -394,6 +406,7 @@ export class Game {
   private bloomBroken = (() => { try { return localStorage.getItem('skyward-parkour.nobloom') === '1'; } catch { return false; } })();
   private setupComposer(bloom: boolean) {
     this.composer?.dispose();
+    this.blackWatch = 10;
     if (!bloom || this.bloomBroken || !this.bloomSupported()) { this.composer = null; this.bloom = null; return; }
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     // HDR target: multisampled only where the GPU can do it for half floats (otherwise the target is incomplete = black)
@@ -424,8 +437,12 @@ export class Game {
    *  should be visible = the bloom pipeline is broken on this GPU: switch it off for good (remembered) and say so. */
   private blackChecks = 0;
   private blackTimer = 0;
+  /** seconds of play left to watch for black frames: reading pixels back stalls the GPU, so only right after the
+   *  bloom pipeline is set up (a broken one is black from the first frame), never for the whole game */
+  private blackWatch = 0;
   private watchBlackFrames(dt: number) {
-    if (!this.composer || this.state !== 'playing') return;
+    if (!this.composer || this.state !== 'playing' || this.blackWatch <= 0) return;
+    this.blackWatch -= dt;
     this.blackTimer += dt;
     if (this.blackTimer < 1.5) return;
     this.blackTimer = 0;
@@ -448,12 +465,13 @@ export class Game {
   applyQuality(q: Quality) {
     this.quality = q;
     this.dynScale = 1;
+    this.autoCap = 0;
     const p = QUALITY_PRESETS[q];
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, p.pixelRatio));
     this.env.setShadows(p.shadows, p.shadowMap);
-    if (this.env.flare) this.env.flare.visible = q !== 'low';
-    this.env.shafts.enabled = q !== 'low';
-    this.maps.setLodDistance(p.lodDistance);
+    if (this.env.flare) this.env.flare.visible = p.effects;
+    this.env.shafts.enabled = p.effects;
+    this.maps.setDetail(detailOf(p));
     this.setupComposer(p.bloom);
     this.onResize();
   }
@@ -475,6 +493,47 @@ export class Game {
   private dynTimer = 0;
   private fpsWindow: number[] = [];
   private slowWindows = 0;
+  /**
+   * Upload a new map's textures (one per frame) and compile its shaders before it is shown: otherwise the first
+   * frame that sees it does all of that at once (a hitch of a few hundred ms on a phone while climbing).
+   */
+  private warmRT: THREE.WebGLRenderTarget | null = null;
+  private warmMat: THREE.MeshBasicMaterial | null = null;
+  private async prepareObjects(root: THREE.Object3D) {
+    const texs = new Set<THREE.Texture>();
+    root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      if (!m) return;
+      for (const x of Array.isArray(m) ? m : [m]) for (const v of Object.values(x)) if ((v as THREE.Texture)?.isTexture) texs.add(v as THREE.Texture);
+    });
+    const loading = this.state === 'loading' || !this.player;
+    const nextFrame = () => (loading ? Promise.resolve() : new Promise<void>((r) => setTimeout(r, 16)));
+    for (const tx of texs) {
+      if (!tx.image) continue;
+      this.renderer.initTexture(tx);
+      await nextFrame();
+    }
+    // vertex buffers too: each model drawn once, alone, into a 1x1 target (uploads its buffers), one per frame
+    const geos = new Map<THREE.BufferGeometry, THREE.Mesh>();
+    root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.geometry && !geos.has(m.geometry)) geos.set(m.geometry, m); });
+    this.warmRT ??= new THREE.WebGLRenderTarget(1, 1);
+    this.warmMat ??= new THREE.MeshBasicMaterial();
+    let n = 0;
+    for (const m of geos.values()) {
+      const mat = m.material, fc = m.frustumCulled;
+      m.material = this.warmMat;
+      m.frustumCulled = false;
+      const prev = this.renderer.getRenderTarget();
+      try { this.renderer.setRenderTarget(this.warmRT); this.renderer.render(m, this.cam.camera); } catch { /* skip */ }
+      this.renderer.setRenderTarget(prev);
+      m.material = mat;
+      m.frustumCulled = fc;
+      if (++n % 3 === 0) await nextFrame();
+    }
+    const r = this.renderer as THREE.WebGLRenderer & { compileAsync?: (s: THREE.Object3D, c: THREE.Camera, t?: THREE.Scene) => Promise<unknown> };
+    if (r.compileAsync) await r.compileAsync(root, this.cam.camera, this.scene).catch(() => undefined);
+  }
+
   private adaptResolution(dt: number) {
     if (this.state !== 'playing') { this.fpsWindow = []; this.dynTimer = 0; return; }
     this.fpsWindow.push(dt);
@@ -491,14 +550,15 @@ export class Game {
     this.dynCooldown = Math.max(0, this.dynCooldown - 2);
     if (avg < target * 0.85) {
       this.slowStreak++;
-      if (this.slowStreak >= 2 && this.dynCooldown <= 0) { next = Math.max(minScale, this.dynScale - 0.12); this.slowStreak = 0; }
+      if (this.slowStreak >= 3 && this.dynCooldown <= 0) { next = Math.max(minScale, this.dynScale - 0.12); this.slowStreak = 0; }
       if (this.dynScale <= minScale + 1e-3) this.slowWindows++;
     } else {
       this.slowStreak = 0;
       this.slowWindows = 0;
       if (avg > target * 1.45 && this.dynCooldown <= 0) next = Math.min(1, this.dynScale + 0.08);
     }
-    if (next !== this.dynScale) this.dynCooldown = 6;
+    // every change re-allocates the frame buffers (a hitch): at most one every 15 s
+    if (next !== this.dynScale) this.dynCooldown = 15;
     if (this.slowWindows >= 2 && this.save.settings.quality == null) {
       const lower = lowerQuality(this.quality);
       if (lower) {
@@ -651,9 +711,12 @@ export class Game {
       progress: (id: string) => ({
         conquered: !!this.save.highestMap && this.orderOf(id) <= this.orderOf(this.save.highestMap),
         best: this.save.bestTimes?.[id] ?? (id === this.firstMapId ? this.save.bestTime ?? null : null),
+        // played or being played: up to the map right above the highest conquered one
+        reached: this.orderOf(id) <= this.orderOf(this.save.highestMap) + 1,
       }),
+      play: (id: string) => { this.ui.online?.closeAll(); void this.start(id, 'adventure'); },
       lbEnabled: () => this.lb.enabled,
-      board: (b: string) => this.lb.board(b),
+      board: (b: string) => this.lb.board(b, 20),
       boards: () => [{ id: 'height', label: t('lb.height') }],
       profile: () => this.lb.profile,
       setName: (n: string) => this.lb.setName(n),
@@ -784,12 +847,60 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ loop
-  private frame() {
-    const rawDt = this.clock.getDelta();
+  // ------------------------------------------------------------------ frame pacing
+  // The frame time comes from the display's own clock (the requestAnimationFrame timestamp, at vsync), not from
+  // when our code happens to run: steadier motion. A frame-rate limit keeps the pacing even on fast screens:
+  // a 120 Hz phone that manages 70-90 FPS shows frames for 1 or 2 screen refreshes at random (judder);
+  // a steady 60 looks smoother. Automatic: on screens of 100 Hz and more, when the game cannot keep up.
+  private tuneTimer = 4;
+  private lastRaf = -1;
+  private lastFrameT = -1;
+  private rafDts: number[] = [];
+  private frameDts: number[] = [];
+  private refreshMs = 1000 / 60;
+  /** automatic limit in FPS (0 = none) */
+  private autoCap = 0;
+  private paceTimer = 0;
+
+  private fpsLimit() {
+    const c = this.save?.settings.fpsCap ?? -1;
+    return c >= 0 ? c : this.autoCap;
+  }
+
+  private tick(t: number) {
+    if (this.lastRaf >= 0) {
+      const d = t - this.lastRaf;
+      if (d > 2 && d < 100) { this.rafDts.push(d); if (this.rafDts.length > 240) this.rafDts.shift(); }
+    }
+    this.lastRaf = t;
+    const cap = this.fpsLimit();
+    if (cap > 0 && this.lastFrameT >= 0 && t - this.lastFrameT < 1000 / cap - this.refreshMs * 0.5) return; // wait a refresh
+    const dtMs = this.lastFrameT < 0 ? this.refreshMs : t - this.lastFrameT;
+    this.lastFrameT = t;
+    this.frameDts.push(dtMs);
+    if (this.frameDts.length > 180) this.frameDts.shift();
+    this.paceTimer += dtMs;
+    if (this.paceTimer > 2000) { this.paceTimer = 0; this.updatePacing(); }
+    this.frame(dtMs / 1000);
+  }
+
+  private updatePacing() {
+    if (this.rafDts.length < 60) return;
+    const sorted = [...this.rafDts].sort((a, b) => a - b);
+    this.refreshMs = sorted[Math.floor(sorted.length * 0.2)];
+    const hz = 1000 / this.refreshMs;
+    if ((this.save?.settings.fpsCap ?? -1) >= 0 || this.state !== 'playing') return;
+    const fps = this.frameDts.length / (this.frameDts.reduce((a, b) => a + b, 0) / 1000);
+    if (!this.autoCap && hz >= 100 && fps < hz * 0.85) this.autoCap = Math.round(hz / 2);
+  }
+
+  private frame(rawDt = this.clock.getDelta()) {
     const dt = Math.min(rawDt, 0.1);
     this.time += dt;
     this.adaptResolution(Math.min(rawDt, 0.5));
-    this.fpsAvg = this.fpsAvg * 0.95 + (dt > 0 ? 1 / dt : 60) * 0.05;
+    // shown FPS = frames / real time over the last half second (an average of 1/dt reads too high)
+    this.fpsFrames++; this.fpsTime += rawDt;
+    if (this.fpsTime >= 0.5) { this.fpsAvg = this.fpsFrames / this.fpsTime; this.fpsFrames = 0; this.fpsTime = 0; }
     this.input.update();
     const pausePressed = this.input.consumePause();
     if (pausePressed) {
@@ -798,6 +909,8 @@ export class Game {
     }
 
     this.admin?.frame(dt);
+    this.tuneTimer -= dt;
+    if (this.tuneTimer <= 0) { this.tuneTimer = 4; tuneMaterials(this.scene, false); }
     if (this.state === 'playing') this.updatePlaying(dt);
     else if (this.state === 'menu' || this.state === 'loading') {
       this.simTime += dt;
@@ -924,12 +1037,11 @@ export class Game {
       if (P.vel.y > 5) { cd = 1.8; cf = 8; sharp = 6; }
       else if (P.vel.y > -5) { cd = 1.4; cf = 5; sharp = 3; }
       else { cd = 1.0; cf = 4; cpitch = 0.2; sharp = 3; }
-      if (Math.random() < 0.5) this.fx.sparkles.emit(P.pos.clone().add(new THREE.Vector3(0, -0.2, 0)), 1, { speed: 0.4, up: -0.2, life: 0.35, size: 0.22 });
+      if (Math.random() < 0.5) this.fx.sparkles.emit(TMP_V.copy(P.pos).setY(P.pos.y - 0.2), 1, { speed: 0.4, up: -0.2, life: 0.35, size: 0.22 });
     }
     if (P.state === 'air' && P.vel.y < -14) {
       const f = Math.min(1, (-P.vel.y - 14) / 22);
       cf += 10 * f; cpitch += 0.12 * f; cd += 0.8 * f; sharp = Math.max(sharp, 3);
-      if (P.vel.y < -30) this.cam.addShake(dt * 0.6);
     }
     if (camMode === 'hang') { cd = 0.9; cpitch = 0.12; sharp = 3; }
     this.cam.setEffects(cd, cf, cpitch, sharp);

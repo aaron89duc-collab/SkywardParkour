@@ -13,6 +13,7 @@ import { MoverSystem } from './Movers';
 import { BoosterSystem, type Ladder } from './Boosters';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { GateSystem } from './Gates';
+import { Culler, tuneMaterials, type Detail } from './Detail';
 
 type LoadedMap = {
   entry: MapRegistryEntry;
@@ -23,6 +24,7 @@ type LoadedMap = {
   movers: MoverSystem;
   boosters: BoosterSystem;
   devices: DeviceSystem;
+  culler: Culler;
 };
 
 /**
@@ -50,6 +52,7 @@ export class MapManager {
     scene.add(this.root);
     this.gates = new GateSystem(physics);
     scene.add(this.gates.group);
+    this.fxCuller = new Culler(fx.group);
   }
 
   /** close / open the end-of-map gates (next map missing / loaded); returns ids of maps whose way just opened */
@@ -102,8 +105,11 @@ export class MapManager {
     const m = this.loaded.get(id);
     if (!m) return false;
     this.loaded.delete(id);
+    this.devCache = null;
     this.loading.delete(id);
     this.root.remove(m.group);
+    m.culler.dispose();
+    m.prefabs.dispose();
     m.group.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (mesh.isMesh || (o as THREE.InstancedMesh).isInstancedMesh) {
@@ -113,6 +119,7 @@ export class MapManager {
     });
     this.physics.removeOwned(id);
     this.fx.removeScope(id);
+    this.fxCuller.collect();
     this.ladderList = [...this.loaded.values()].flatMap((x) => x.boosters.ladders);
     this.onUnloaded?.(id);
     return true;
@@ -170,6 +177,7 @@ export class MapManager {
     let sprites: SpriteSystem | null = null;
     if (own || this.atlasTex) {
       sprites = new SpriteSystem(own?.tex ?? this.atlasTex!, own?.rects ?? this.atlasRects);
+      sprites.detail = this.detail;
       group.add(sprites.build(data.sprites));
     }
 
@@ -210,8 +218,17 @@ export class MapManager {
     if (this.collected) devices.markCollected([...this.collected].filter((k) => k.startsWith(entry.id + ':')).map((k) => k.slice(entry.id.length + 1)));
     if (this.latched) devices.markLatched([...this.latched].filter((k) => k.startsWith(entry.id + ':')).map((k) => k.slice(entry.id.length + 1)));
 
+    tuneMaterials(group);
+    prefabs.detail = this.detail;
+    // shaders and textures of the new map are prepared before it shows (no hitch when it appears mid-climb)
+    if (this.prepare) await this.prepare(group).catch(() => undefined);
+    group.updateMatrixWorld(true);
+    const culler = new Culler(group);
     this.root.add(group);
-    this.loaded.set(entry.id, { entry, data, group, prefabs, sprites, movers, boosters, devices });
+    tuneMaterials(this.scene); // materials can be shared between maps (cached models): look at everything
+    this.loaded.set(entry.id, { entry, data, group, prefabs, sprites, movers, boosters, devices, culler });
+    this.devCache = null;
+    this.fxCuller.collect();
     this.ladderList = [...this.loaded.values()].flatMap((m) => m.boosters.ladders);
     this.physics.world.updateSceneQueries();
     return data;
@@ -233,13 +250,20 @@ export class MapManager {
   playerFeet: (() => { y: number; rising: boolean }) | null = null;
   /** device systems outside any map (test bench, admin sandbox) */
   private extraDevices: DeviceSystem[] = [];
-  private devs() { const l = [...this.loaded.values()].map((m) => m.devices); return this.extraDevices.length ? l.concat(this.extraDevices) : l; }
+  // the device systems of all loaded maps (+ test benches), rebuilt only when a map comes or goes: this is read
+  // several times per physics step and used to make new arrays each time
+  private devCache: DeviceSystem[] | null = null;
+  private devs() {
+    if (!this.devCache) this.devCache = [...[...this.loaded.values()].map((m) => m.devices), ...this.extraDevices];
+    return this.devCache;
+  }
   /** Build a set of devices that is not part of a map (test bench / sandbox). */
   async addDevices(list: import('./Devices').DeviceData[]) {
     const d = new DeviceSystem(this.physics);
     await this.physics.ownedBy('__devices', () => d.build(list, this.assets));
     this.root.add(d.group);
     this.extraDevices.push(d);
+    this.devCache = null;
     return d;
   }
   surfaceOf(c: RAPIER.Collider | null | undefined): Surface | null { for (const d of this.devs()) { const r = d.surfaceOf(c); if (r) return r; } return null; }
@@ -268,9 +292,11 @@ export class MapManager {
 
   stepMovers(t: number, dt: number) {
     const f = this.playerFeet?.() ?? { y: -1e9, rising: false };
-    for (const m of this.loaded.values()) m.movers.step(t, dt);
+    let moving = this.extraDevices.length > 0;
+    for (const m of this.loaded.values()) { m.movers.step(t, dt); if (m.movers.count || m.devices.list.length) moving = true; }
     for (const d of this.devs()) d.step(t, dt, f.y, f.rising);
-    if (this.extraDevices.length || [...this.loaded.values()].some((m) => m.devices.list.length)) this.physics.world.updateSceneQueries();
+    // one refresh of the query pipeline for everything that moved (it used to run once per map as well)
+    if (moving) this.physics.world.updateSceneQueries();
   }
   resetMovers(t: number) { for (const m of this.loaded.values()) m.movers.reset(t); for (const d of this.devs()) d.reset(t); }
   syncMovers(alpha: number) { for (const m of this.loaded.values()) m.movers.syncVisual(alpha); }
@@ -303,15 +329,26 @@ export class MapManager {
   }
 
   update(time: number, camPos: THREE.Vector3, tint: THREE.Color, dt = 1 / 60) {
+    this.fxCuller.update(camPos, this.detail);
     for (const m of this.loaded.values()) {
       m.prefabs.update(camPos);
-      m.sprites?.update(time, tint);
+      m.culler.update(camPos, this.detail);
+      m.sprites?.update(time, tint, camPos);
       m.boosters.update(dt, time);
     }
     this.gates.update(time);
   }
 
-  setLodDistance(d: number) {
-    for (const m of this.loaded.values()) { m.prefabs.lodDistance = d; m.prefabs.update(new THREE.Vector3(1e9, 0, 0), true); }
+  /** level of detail / draw distances (quality setting) for every loaded map and the ones loaded later */
+  detail: Detail = { lod0K: 6, lod0Min: 26, lod0KGood: 4.5, lod0MinGood: 10, lod1K: 13, lod1Min: 45, shadowDist: 28, cullK: 170, cullMin: 100, spriteK: 12, spriteDensity: 0.5 };
+  /** set by the game: uploads a new map's textures and compiles its shaders before it is shown */
+  prepare: ((group: THREE.Object3D) => Promise<void>) | null = null;
+  private fxCuller!: Culler;
+
+  setDetail(d: Detail) {
+    this.detail = d;
+    const far = new THREE.Vector3(1e9, 0, 0);
+    for (const m of this.loaded.values()) { m.prefabs.detail = d; m.prefabs.update(far, true); if (m.sprites) { m.sprites.detail = d; m.sprites.select(far, true); } m.culler.update(far, d, true); }
+    this.fxCuller?.update(far, d, true);
   }
 }

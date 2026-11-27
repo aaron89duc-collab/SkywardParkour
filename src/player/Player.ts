@@ -154,6 +154,7 @@ export class Player {
   private ledge: Ledge | null = null;
   private move: Move | null = null;
   private hangRoot = new THREE.Vector3();
+  private ledgeCheckT = 0;
   private ikWeight = 0;
   private stepDist = 0;
   private jumpAnimTimer = 0;
@@ -267,6 +268,17 @@ export class Player {
 
   /** standing only on a thin lip of a wall (no ground under the capsule's inner footprint, a wall right beside it):
    *  the wall's normal (pointing away from it), else null */
+  private airStillT = 0;
+  /** a wall at the other side too (n points away from the first wall): the capsule sits in a crevice */
+  private inCrevice(n: THREE.Vector3) {
+    const f = this.pos.y - FEET;
+    for (const h of [0.05, 0.2, 0.4]) {
+      const w = this.physics.raycast(_lp.set(this.pos.x, f + h, this.pos.z), n, PHYS.capsuleRadius + 0.25);
+      if (w && Math.abs(w.normal.y) < 0.35) return true;
+    }
+    return false;
+  }
+
   private lipWallNormal(): THREE.Vector3 | null {
     const f = this.pos.y - FEET;
     for (const [ox, oz] of INNER_PROBES) {
@@ -513,12 +525,24 @@ export class Player {
       if (this.grounded || heldUp) {
         const n = this.lipWallNormal();
         if (n) {
-          this.grounded = false;
-          this.vel.y = Math.max(Math.min(this.vel.y, 0), -2);
-          this.lipN.copy(n);
-          this.lipPushT = 0.2;
+          if (this.inCrevice(n)) {
+            // wedged in a gap narrower than the body (between two containers): held by both rims, that IS footing
+            // (before: "falling" forever, no control, no jump - the player could not get out)
+            this.grounded = true;
+            this.vel.y = -1.5;
+          } else {
+            this.grounded = false;
+            this.vel.y = Math.max(Math.min(this.vel.y, 0), -2);
+            this.lipN.copy(n);
+            this.lipPushT = 0.2;
+          }
         }
       }
+      // safety net for any other trap: "in the air" but not moving at all for half a second = held up by something
+      if (!this.grounded && this.state === 'air' && this.vel.y <= 0 && Math.abs(mv.y) < 2e-3 && Math.hypot(mv.x, mv.z) < 2e-3) {
+        this.airStillT += dt;
+        if (this.airStillT > 0.5) { this.grounded = true; this.vel.y = -1.5; }
+      } else this.airStillT = 0;
     }
     const blockedX = Math.abs(desired.x) > 1e-5 ? mv.x / desired.x : 1;
     const blockedZ = Math.abs(desired.z) > 1e-5 ? mv.z / desired.z : 1;
@@ -1312,6 +1336,26 @@ export class Player {
     const L = this.ledge!;
     this.swingT += dt;
     this.catchT += dt;
+    // the ledge is gone (a platform that blinks out / crumbles while we hang on it): fall
+    this.ledgeCheckT += dt;
+    if (this.ledgeCheckT >= 0.06 && !L.mover) {
+      this.ledgeCheckT = 0;
+      let there = false;
+      for (const inset of [0.06, 0.14, 0.3]) {
+        const g = this.physics.raycast(_lp.set(L.edge.x - L.normal.x * inset, L.y + 0.5, L.edge.z - L.normal.z * inset), DOWN, 0.95);
+        if (g && g.point.y > L.y - 0.4) { there = true; break; }
+      }
+      if (!there) {
+        this.state = 'air';
+        this.vel.set(L.normal.x * 0.5, -1, L.normal.z * 0.5);
+        this.regrab = 0.25; // another ledge below can still be caught
+        this.ledge = null;
+        this.airTime = 0;
+        this.fallPeakY = this.feetY;
+        this.events.push({ type: 'drop' });
+        return;
+      }
+    }
     // let go: hold the stick away from the wall for a moment (away + jump is still the wall push-off)
     const awayNow = this.wishLen > 0.35 ? this.wish.dot(L.normal) : 0;
     this.letGoT = awayNow > 0.7 && this.jumpBuffer <= 0 ? this.letGoT + dt : 0;
